@@ -483,7 +483,7 @@ This is a classic edge case:
 **When the padding and length can't both fit in the final partial block, an extra 512-bit block is added.**
 
 --- 
-2. **Initialize state**: The MD5 algorithm doesn’t take those 512 bits and spit out a hash in one go. Instead: It initializes four 32-bit values (A, B, C, D). These are your internal “state”. So, start with 4 fixed values: A, B, C, D (32 bits each)
+2. **Initialize state**: The MD5 algorithm doesn’t take those 512 bits and spit out a hash in **one go**. Instead: It initializes four 32-bit values (A, B, C, D). These are your internal “state”. So, start with 4 fixed values: A, B, C, D (32 bits each)
 ---
 3. **Process blocks**:
 
@@ -494,7 +494,7 @@ This is a classic edge case:
 
 ## More On How MD5 Updates Its Internal State (A, B, C, D)
 
-After preprocessing and splitting the message into 512-bit blocks, MD5 processes each block to **update its internal state**, which consists of four 32-bit registers:
+After preprocessing and splitting the message into 512-bit blocks, MD5 processes each block to **update its internal state**, which consists of four 32-bit registers(= Working memory slots where we stir the ingredients of the message block, round after round.)
 
 ```plaintext
 A = 0x67452301  
@@ -590,7 +590,6 @@ MD5 was designed for Intel’s architecture, so it reads multi-byte data assumin
 * In 2004, attackers could generate **collisions** (Find two different inputs produce the same hash output.)
 * Finding a collision takes \~2^64 operations — much easier than expected
 
----
 
 ## SHA-1 (Secure Hash Algorithm 1)
 ![alt text](images/SHA-1.png)
@@ -604,14 +603,23 @@ MD5 was designed for Intel’s architecture, so it reads multi-byte data assumin
 ### How SHA-1 Works:
 
 1. **Padding**: Like MD5, pads the message to fit 512-bit blocks
-2. **Initialize state**: 5 constants: A, B, C, D, E
+2. **Initialize state**: 5 constants: A, B, C, D, E = State registers are a group of variables (like a, b, c, etc.) that hold the evolving result of the hash computation. 
+
+>  Why are they called **“State”** Registers?
+>
+>Because they represent the current state of the hash function as it’s processing data. 
+> 
+>By the end of all rounds: The final values in the registers are your digest
+>
+>The message **never** becomes the hash. Instead, the message modifies the state registers, and their final state becomes the hash.
+
 3. **Process blocks**:
 
    * Each block goes through **80 rounds** of bitwise mixing
    * Adds more complexity than MD5
 4. **Final hash**: Combine A, B, C, D, E → 160-bit hash
 
-## 🔍 MD5 vs SHA-1: Internal Differences (Detailed Table)
+## MD5 vs SHA-1: Internal Differences (Detailed Table)
 
 This table compares the internal mechanisms of **MD5** and **SHA-1** side-by-side, focusing on how each algorithm processes data under the hood.
 
@@ -619,7 +627,7 @@ This table compares the internal mechanisms of **MD5** and **SHA-1** side-by-sid
 |-----------------------------|------------------------------------------------------|---------------------------------------------------------|
 | **Block size**              | 512 bits                                             | 512 bits                                                |
 | **Message words**           | 16 × 32-bit words (`M[0]`–`M[15]`)                   | 80 × 32-bit words (`W[0]`–`W[79]`)                      |
-| **Message expansion**       | None — uses `M[0]` to `M[15]` directly               | Expands from `M[0-15]` using:                           |
+| **Message expansion**       | None, uses `M[0]` to `M[15]` directly               | Expands from `M[0-15]` using:                           |
 |                             |                                                      | `W[i] = ROTL1(W[i-3] ⊕ W[i-8] ⊕ W[i-14] ⊕ W[i-16])`     |
 | **State registers**         | 4 × 32-bit: `A, B, C, D`                             | 5 × 32-bit: `A, B, C, D, E`                             |
 | **Initial values**          | A = 0x67452301<br>B = 0xefcdab89<br>C = 0x98badcfe<br>D = 0x10325476 | Same A–D plus:<br>E = 0xc3d2e1f0                        |
@@ -686,4 +694,555 @@ Little-endian is a byte-ordering format where the **least significant byte** (LS
 ### Summary
 - **Little-endian**: LSB first: smallest powers of 2 come first.
 - **Big-endian**: MSB first: human-readable, but less common in modern low-level systems.
+
+## SHA-256: Internals Explained (with Step-by-Step Breakdown)
+
+### 1. What Are the 64 or 80 Constants?
+
+**They're Called Round Constants: K[0], K[1], …, K[63] (for SHA-256)**
+
+Or up to K[79] in SHA-512.
+
+These constants are:
+- **Fixed, published in the FIPS/NIST documentation**
+- Each is a 32-bit (SHA-256) or 64-bit (SHA-512) word
+- **Derived from the fractional part of cube roots of the first 64 primes**
+
+**Example (SHA-256 first few constants):**
+
+```plaintext
+K[0] = 0x428a2f98
+K[1] = 0x71374491
+K[2] = 0xb5c0fbcf
+K[3] = 0xe9b5dba5
+...
+K[63] = 0xc67178f2
+```
+
+👉 These are not random — they're mathematically derived, and every SHA-256 implementation uses the exact same set.
+
+
+### 2. What's Going on in the Loop?
+
+You saw this pseudocode:
+
+```plaintext
+// Start
+a = H0
+b = H1
+c = H2
+d = H3
+e = H4
+f = H5
+g = H6
+h = H7
+```
+
+These are called the **working variables**. They represent the internal state for one 512-bit chunk.
+
+Then comes the real action:
+
+```plaintext
+for i in 0..63:
+   temp1 = h + Σ1(e) + Ch(e, f, g) + K[i] + W[i]
+   temp2 = Σ0(a) + Maj(a, b, c)
+
+   h = g
+   g = f
+   f = e
+   e = d + temp1
+   d = c
+   c = b
+   b = a
+   a = temp1 + temp2
+```
+
+Let's break this down line by line.
+
+
+**💥 W[i]: Message Schedule**
+- The message block is split into 16 × 32-bit chunks
+- These are expanded into 64 entries using bitwise mixing and shifts
+- **W[i] is one of these expanded values** — a prepared piece of your message
+
+
+**Σ1(e) and Σ0(a): Big Rotating Functions**
+- These are bitwise rotations and shifts:
+
+For SHA-256:
+
+```plaintext
+Σ1(x) = ROTR^6(x) ⊕ ROTR^11(x) ⊕ ROTR^25(x)
+Σ0(x) = ROTR^2(x) ⊕ ROTR^13(x) ⊕ ROTR^22(x)
+```
+
+- These functions **diffuse entropy**, spreading bits around to increase the avalanche effect
+
+
+
+**Ch(e,f,g) and Maj(a,b,c)**
+
+These are bit-selecting functions:
+- **Choose (Ch)**: returns bits from f if e is 1, else from g
+
+```plaintext
+Ch(e, f, g) = (e AND f) XOR ((NOT e) AND g)
+```
+
+- **Majority (Maj)**: returns the majority bit of a, b, and c
+
+```plaintext
+Maj(a, b, c) = (a AND b) XOR (a AND c) XOR (b AND c)
+```
+
+These inject **nonlinearity**.
+
+
+**temp1 and temp2:**
+
+These are temporary values used to update the internal state:
+
+```plaintext
+temp1 = h + Σ1(e) + Ch(e,f,g) + K[i] + W[i]
+temp2 = Σ0(a) + Maj(a,b,c)
+```
+
+Then we rotate the state variables down, inject the new values:
+
+```plaintext
+h = g
+g = f
+f = e
+e = d + temp1
+...
+a = temp1 + temp2
+```
+
+Imagine these like **8 gears in a machine**. On every round, the gears rotate, and `a` is replaced with the new mixed value.
+
+
+**Why So Much Rotation?**
+- It's how **confusion and diffusion** (Claude Shannon's principles for crypto) are introduced
+- A small change in the message completely changes the hash → **Avalanche Effect**
+- The rounds mutate the internal state, and each round builds on the previous
+
+
+**After All 64 Rounds**
+
+The mutated state `a` to `h` is added back to the original `H0` to `H7`.
+
+This is like saying:
+
+```plaintext
+H0 = H0 + a
+H1 = H1 + b
+...
+H7 = H7 + h
+```
+
+So the new `H0...H7` become the starting values for the next block.
+
+At the end of the last block, you concatenate them:
+
+```plaintext
+SHA-256 hash = H0 || H1 || ... || H7  →  256 bits
+```
+
+
+### 1. Initial Preparation
+
+**Break the input message into 512-bit chunks**
+
+SHA-256 operates on 512-bit blocks. If your message is longer, it's broken down into multiple chunks of 512 bits.
+
+
+### 2. Create the Message Schedule Array
+
+**What's the Message Schedule?**
+
+You start with 64 words of 32 bits each: `W[0]...W[63]`.
+- `W[0]` to `W[15]` come directly from the message block.
+- `W[16]` to `W[63]` are generated using previous values and bitwise operations.
+
+**Extension Formula**
+
+```plaintext
+for i from 16 to 63:
+    s0 = (W[i-15] rightrotate 7) xor (W[i-15] rightrotate 18) xor (W[i-15] rightshift 3)
+    s1 = (W[i-2]  rightrotate 17) xor (W[i-2]  rightrotate 19) xor (W[i-2]  rightshift 10)
+    W[i] = W[i-16] + s0 + W[i-7] + s1
+```
+
+This spreads the entropy and makes it harder to find patterns in inputs (improves diffusion).
+
+
+### 3. Compression Function: 64 Rounds
+
+**📌 Set initial working variables:**
+
+These are copied from the current hash values:
+
+```plaintext
+a = H0
+b = H1
+...
+h = H7
+```
+
+**Loop over 64 rounds (i = 0 to 63):**
+
+Each round:
+
+```plaintext
+S1  = (e rightrotate 6) xor (e rightrotate 11) xor (e rightrotate 25)
+ch  = (e and f) xor ((not e) and g)
+temp1 = h + S1 + ch + K[i] + W[i]
+
+S0  = (a rightrotate 2) xor (a rightrotate 13) xor (a rightrotate 22)
+maj = (a and b) xor (a and c) xor (b and c)
+temp2 = S0 + maj
+
+// Rotate state registers
+h = g
+g = f
+f = e
+e = d + temp1
+d = c
+c = b
+b = a
+a = temp1 + temp2
+```
+
+
+### 4. Update Hash State
+
+After all 64 rounds, the final `a` to `h` values are added back into the hash state:
+
+```plaintext
+H0 = H0 + a
+H1 = H1 + b
+H2 = H2 + c
+H3 = H3 + d
+H4 = H4 + e
+H5 = H5 + f
+H6 = H6 + g
+H7 = H7 + h
+```
+
+
+
+### 5. Final Digest (Output)
+
+The final hash is:
+
+```plaintext
+digest := H0 || H1 || H2 || H3 || H4 || H5 || H6 || H7
+```
+
+Each H is 32 bits → 8 x 32 = **256-bit hash** 🎉
+
 ---
+
+### ❓ Common Confusions Clarified
+
+**🔄 Why 64 words when message gives only 16?**
+- You extend from the 16 initial words using shifts, rotations, and XOR.
+- This is essential for security, preventing simple attacks.
+
+**🧮 What about the K[i] constants?**
+- `K[0]` to `K[63]` are pre-defined constants derived from the fractional parts of the cube roots of the first 64 primes.
+- These are public, universal, and used in every SHA-256 implementation.
+---
+
+### Key Differences: SHA-1 vs SHA-256
+
+| Area             | SHA-1                | SHA-256 (SHA-2)              |
+|------------------|----------------------|------------------------------|
+| Schedule         | 80 words             | 64 words (more complex ops)  |
+| Rotation Logic   | Only ROTL, simple XOR| ROTR + right shift, more entropy |
+| Compression      | Simpler boolean funcs| More advanced: ch, maj, etc. |
+| Bit Width        | 32-bit, 5 registers  | 32-bit, 8 registers          |
+| Final Hash       | 160 bits             | 256 bits                     |
+
+---
+
+### Purpose of the Message Schedule
+
+The message schedule expands the original 16 words from the message block into 64 (SHA-256) or 80 (SHA-1) words. This is not padding, but an internal process to create more complexity and diffusion in the hash function. The extra words are generated using bitwise operations (XOR, shifts, rotates) to ensure each round receives a unique, mixed value.
+
+---
+
+### Terminology
+
+| Term                | Meaning                                                      |
+|---------------------|-------------------------------------------------------------|
+| 512-bit Block       | The chunk of data processed at each step                     |
+| 32-bit Word         | Each block is divided into 16 words (512 / 32 = 16)          |
+| W[0..15]            | Directly read from the message block                         |
+| W[16..63] or W[16..79] | Generated from W[0..15] using mixing operations           |
+| Message Schedule    | The full array W[0..63] or W[0..79] (real + derived words)   |
+
+---
+
+### Why Expand the Schedule?
+
+- SHA-256 needs 64 rounds, so it requires 64 words (W[0] to W[63]).
+- SHA-1 needs 80 rounds, so it requires 80 words (W[0] to W[79]).
+- Only 16 are directly from the message; the rest are generated to increase security.
+
+For SHA-1:
+```plaintext
+W[i] = ROTL1(W[i-3] ⊕ W[i-8] ⊕ W[i-14] ⊕ W[i-16])
+```
+For SHA-256:
+```plaintext
+s0 = (W[i-15] >>> 7) ⊕ (W[i-15] >>> 18) ⊕ (W[i-15] >> 3)
+s1 = (W[i-2] >>> 17) ⊕ (W[i-2] >>> 19) ⊕ (W[i-2] >> 10)
+W[i] = W[i-16] + s0 + W[i-7] + s1
+```
+This schedule expansion is crucial for the security of the hash function.
+
+### Can You Recover the Message from the Hash?
+
+No, you cannot "unhash" a message. Hash functions are designed to be one-way: given a hash, there is no practical way to recover the original message.
+
+**How verification works:**
+1. The sender hashes the message using a known algorithm (like SHA-256) to get a digest H(m).
+2. The sender sends the message (and optionally the digest or a signature).
+3. The receiver hashes the received message again to get H'(m).
+4. The receiver compares H'(m) to the sender's hash:
+   - If they match, the message is unchanged.
+   - If they don't match, the message was tampered with or corrupted.
+
+**You never "unhash"**—both sides simply recompute the hash and compare.
+
+
+#### Why do both sides always get the same hash?
+
+Both sender and receiver use the exact same algorithm and fixed constants, which are:
+- **Initialization values** (e.g., H0 to H7 in SHA-256), chosen from mathematical sources and published in the standard.
+- **Round constants** (K[i]), also fixed and public.
+
+These constants are hardcoded in every correct implementation and are not secret. This makes the hash function **deterministic**: same input, same output, every time.
+
+If any constant or rule were different, the hashes would not match. That's why certified libraries (like OpenSSL, hashlib, etc.) strictly follow the official standards.
+
+---
+
+# HMAC Explained (RFC 2104, 1997)
+
+HMAC (**Hash-based Message Authentication Code**) is a construction used for verifying both the **integrity** and **authenticity** of a message. It works by combining:
+- A cryptographic **hash function** (like SHA-1, SHA-256, or SHA-512), and
+- A **secret key** shared between sender and receiver.
+
+## Why Use HMAC?
+Hash functions alone do **not** use a secret. If someone can modify the message, they can also compute a new hash. HMAC prevents this by involving a key.
+
+## Definition (from RFC 2104)
+Given:
+- `H` = the hash function (e.g., SHA-256)
+- `K` = secret key
+- `text` = the message to authenticate
+- `B` = block size in **bytes** of the hash function
+- `L` = output size in **bytes** of the hash function, * **SHA-256 produces 256 bits** So, 256 bits / 8 = **32 bytes** output. This is often represented as a 64-character hexadecimal string (each hex digit = 4 bits)
+
+
+We define two fixed constants:
+- `ipad = 0x36` repeated `B` times
+- `opad = 0x5C` repeated `B` times
+
+They aren’t words — they are just names chosen in the spec (RFC 2104) to refer to these paddings.
+
+These are **predefined 64-byte constants** used to scramble the key in different ways for the two rounds of hashing.
+
+* `ipad` = inner padding = byte `0x36` repeated 64 times
+* `opad` = outer padding = byte `0x5C` repeated 64 times
+
+
+## HMAC Algorithm: Step-by-Step
+
+The HMAC function is defined as:
+
+```text
+HMAC(K, message) = H((K ⊕ opad) || H((K ⊕ ipad) || message))
+```
+
+Where:
+
+* `K` = secret key
+* `H` = hash function (SHA-256)
+* `⊕` = bitwise XOR
+* `||` = concatenation
+
+#### Step-by-Step:
+
+1. **Pad Key**: Make key K exactly 64 bytes (SHA-256 block size)
+
+   * If too short: pad with zeroes
+   * If too long: hash it first, then pad to 64 bytes
+
+2. **Inner XOR**:
+
+   ```
+   k_ipad = K ⊕ ipad
+   ```
+
+3. **Inner Hash**:
+
+   ```
+   inner_hash = H(k_ipad || message)
+   ```
+
+4. **Outer XOR**:
+
+   ```
+   k_opad = K ⊕ opad
+   ```
+
+5. **Final HMAC**:
+
+   ```
+   HMAC = H(k_opad || inner_hash)
+   ```
+
+
+![alt text](images/HMAC.png)
+
+
+## BSI Recommendations (2025 Update)
+![alt text](images/BSI.png)
+
+| Nr | HMAC Variant  | Spec                | Use Until |
+| -- | ------------- | ------------------- | --------- |
+| 1  | hmac-sha2-256 | RFC 6668, Chapter 2 | 2031+     |
+| 2  | hmac-sha2-512 | RFC 6668, Chapter 2 | 2031+     |
+
+BSI still recommends HMAC-SHA2 family (SHA-256 or SHA-512) for MACs.
+
+
+
+## Summary
+
+HMAC adds a layer of protection on top of hash functions. It ensures:
+
+* **Message authenticity** (only the holder of the key can produce the correct HMAC)
+* **Message integrity** (tampering is detectable)
+
+It is widely used in:
+
+* TLS/SSL
+* IPsec
+* JWTs
+* API authentication
+
+---
+## Detailed Breakdown: Digital Signature and RSA (Based on German Lecture Notes)
+
+---
+
+### 1. **Challenge of Digital Signatures**
+
+Electronic data can be easily copied and modified **without leaving any traces**. Therefore, digital signatures must fulfill the following requirements:
+
+* **Proof of Origin (Herkunft)**: The recipient should be able to identify the sender.
+* **Proof of Originality (Originalität)**: The signature cannot be changed afterward or transferred to another message.
+* **Proof of Intent (Handlung)**: The signature must reflect a deliberate action that the sender cannot deny later.
+
+---
+
+### 2. **Digital Signature with RSA: Basic Setup**
+
+Participants:
+
+* A wants to send message **M** to B.
+* **Public Keys**: A's is $(e_A, n_A)$, B's is $(e_B, n_B)$
+* **Private Keys**: Only A knows $(d_A, n_A)$, only B knows $(d_B, n_B)$
+
+#### Two Goals:
+
+1. **Confidentiality**: Encrypt the message with B's public key $(e_B, n_B)$.
+2. **Signature**: Sign the message (or just its hash) using A's private key $(d_A, n_A)$.
+
+---
+
+### 3. **Process: Creating a Digital Signature**
+
+#### Sender A:
+
+1. Compute the hash of the message: $H(M)$
+2. Sign the hash: $\text{Sig}(M) = H(M)^{d_A} \mod n_A$
+3. Send both message and signature: $M \| \text{Sig}(M)$
+
+---
+
+### 4. **Verification by Receiver B**
+
+1. Receive the message and signature: $M \| \text{Sig}(M)$
+2. Compute $H(M)$
+3. Verify signature by computing: $\text{Sig}(M)^{e_A} \mod n_A$
+4. If the result matches $H(M)$, the signature is valid and proves:
+
+   * Message is authentic (from A)
+   * Message is intact (not modified)
+
+---
+
+### 5. **Key Takeaways**
+
+* **Digital Signatures require asymmetric encryption**.
+* The signer uses their **private key** to sign.
+* The verifier uses the **public key** to check.
+
+---
+
+### 6. **Why HMAC is Not a Digital Signature**
+
+* HMAC uses a shared secret between sender and receiver.
+* Both can generate the same HMAC.
+* **No proof of origin** — it only authenticates that someone with the shared secret created it.
+
+---
+
+### 7. **Complexity and Fragility**
+
+* Crypto systems are very **unforgiving** — a small mistake can break security.
+* Quote from Eran Hammer (OAuth 2.0 Editor):
+
+  > "Even beyond the complex math, cryptography is hard because it is generally unforgiving."
+
+---
+
+### 8. **Implementation Issues**
+
+Example: A bug in IPsec (Strongswan) allowed **empty ECDSA signatures**.
+
+* Bug existed from 2009 to 2013.
+* Shows how easily cryptographic systems can be misused.
+
+---
+
+### 9. **Replay Attack (Without Authentication)**
+
+1. A sends $M | \text{Sig}(M)$ to B
+2. Attacker Eve records this message.
+3. Eve replays it later pretending to be A.
+4. B thinks A sent the message again.
+
+**Problem**: Missing authentication — B cannot confirm it's really A sending it now.
+
+---
+
+### 10. **Challenge-Response with RSA**
+
+Definition:
+
+> A knowledge-based authentication scheme. A challenge (fresh random value) is sent, and only someone with the correct private key can compute the response.
+
+#### RSA Version:
+
+1. A sends: $M \| \text{Sig}(M)$
+2. B sends A a challenge: $\text{challenge} = \text{Encrypt}_{\text{pub}}(N)$
+3. A decrypts with private key and sends $N$ back.
+
+* $N$ is a **Nonce** (Number used once)
+* Prevents replay attacks
