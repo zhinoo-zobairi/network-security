@@ -2,9 +2,12 @@
 
 ## 1. What is the Internet?
 ### 1.1 Internet = "network of networks"
-- The Internet is not a single machine or cable.
+- The Internet is not a single machine or cable. It’s a federation of thousands of independent networks, all connected together and agreeing to exchange traffic.
+- These independent networks are called **Autonomous Systems** (ASes).
 - It is a **giant network made up of smaller networks** (ISPs, universities, companies, data centers).
 - These networks are linked at **Internet Exchange Points (IXPs)** where different providers physically connect their routers.
+- ISPs are also ASes, and they connect to each other or to larger carriers at Internet Exchange Points (IXPs).
+- Others like universities or companies should apply for their own **IP Space** and they get it from **Regional Internet Registry (RIR)** and then configure their router to announce this block via **BGP(Border Gateway Protocol)**. That's how they become a part of internet.
 
 ### 1.2 How Data Flows (from your device to Google)
 
@@ -113,8 +116,6 @@ When you type `google.com` into your browser, this is what really happens step b
 
 ⚠️ Note: This "prefix allocation" is **different** from how the device itself chooses its **host ID** (the second half of the address). We will cover that below in the MAC address section.
 
----  
-
 ---
 
 4. **Backbone networks / Internet Exchange Points (IXPs)**  
@@ -134,17 +135,33 @@ When you type `google.com` into your browser, this is what really happens step b
 
 ### 1.3 Special Case: VPNs
 
+### VPN Types and How They Work
+
 - **Corporate VPN (e.g., Cisco ASA, Palo Alto, Fortinet)**  
-  - Your packets are first encrypted and tunneled through the ISP backbone.  
-  - The tunnel ends at the company’s **VPN appliance**, which decrypts the traffic and injects it into the corporate LAN.  
-  - You now appear “inside” the office network, even if working remotely.  
+  - Your device sets up an **encrypted tunnel** to the company’s VPN appliance.  
+  - Even here, your packets **must first cross your ISP’s routers and backbone** — there is no bypassing that.  
+  - What the ISP sees:  
+    - Source = your home public IP.  
+    - Destination = company VPN appliance’s IP.  
+    - Payload = encrypted blob (cannot see inner destinations).  
+  - At the VPN appliance (in the office or datacenter):  
+    - Packets are **decrypted**.  
+    - Injected into the **corporate LAN** as if you were physically there.  
+  - Effect: you appear “inside the office network” remotely.
 
-- **Personal VPN (e.g., NordVPN, ProtonVPN, Mullvad)**  
-  - Your packets are encrypted and tunneled to a VPN provider’s server.  
-  - The tunnel ends at the VPN server; from there, traffic continues to the Internet normally.  
-  - Websites see the VPN server’s IP/location, not yours.  
+- **Commercial VPN**  
+  - Your device sets up an **encrypted tunnel** to the VPN provider’s server.  
+  - ISP again only sees “you ↔ VPN server” (encrypted traffic).  
+  - At the VPN server:  
+    - Packets are **decrypted**.  
+    - Forwarded to the actual Internet destinations (Google, YouTube, etc.).  
+  - Effect: websites see the VPN server’s IP/location, not your home IP.  
 
-👉 In both cases, packets still cross ISP routers and IXPs, only the **tunnel termination point changes = the end of the encrypted pipe is different depending on the VPN type.**
+👉 In both cases:  
+- Packets always **physically cross your ISP’s network first** (cables, routers, backbone).  
+- The difference is the **tunnel termination point**:  
+  - **Corporate VPN:** tunnel ends at the company’s gateway → traffic enters the corporate LAN.  
+  - **Personal VPN:** tunnel ends at the VPN provider’s server → traffic enters the wider Internet.
 
 ---
 
@@ -193,15 +210,64 @@ When you type `google.com` into your browser, this is what really happens step b
 3. **Collapse consecutive all-zero groups (only once!):**
 `2001:db8::1`
 
-Always expands back to **8 groups** internally.
+⚠️ Important: `::` may only be used **once** per address.  
 
----
+- Allowed: `2001:DB8::8:0:0:417A` ✅ 
+- Not allowed: `2001:DB8::8::417A` ❌ 
+
+Always expands back to **8 groups** internally.
 
 ## Why IPv6?
 - IPv4 = ~4.3 billion addresses → exhausted in 2019 (RIPE NCC ran out).
-- IPv6 = 128-bit space → That’s 340 undecillion possible ~3.4 × 10³⁸ addresses.
+- IPv6 = 128-bit space → That’s 340 undecillion possible ~3.4 × 10³⁸ addresses = 7·1023 Adressen pro Quadratmeter
 - Enough for every phone, car, fridge, sensor (IoT), etc.
 
+## How it started Vs. How it's going
+
+### 1995–2006: 6Bone Test Network
+- **Goal:** Provide a testbed for IPv6 before real deployment.  
+- **Method:** Used *IPv6-in-IPv4 tunneling* (encapsulating IPv6 packets inside IPv4).  
+- **Impact:** Allowed researchers, universities, and early adopters to experiment with routing and addressing.  
+- **Shutdown:** 2006, once native IPv6 began rolling out.
+
+### 2011: World IPv6 Day (June 8, 2011)
+- Major players (**Google, Yahoo, Facebook**) enabled IPv6 alongside IPv4 for 24 hours.  
+- Purpose:
+  - Test IPv6 readiness worldwide.  
+  - Identify breakages in ISP and enterprise networks.  
+- Result:  
+  - Only ~0.229% of users were on IPv6.  
+  - Quote (Igor Gashinsky, Yahoo):  
+    > “That was a lot of work for 0.229% IPv6 users.”
+
+### Challenges During Early Adoption
+1. **New protocols = new risks**  
+   - IPv6 + ICMPv6 introduced unfamiliar attack surfaces.  
+   - Example: IPv6 Neighbor Discovery could be abused like ARP spoofing in IPv4.  
+
+2. **Security tools not compatible**  
+   - Firewalls, IDS/IPS initially built for IPv4.  
+   - Could not parse IPv6 headers or extension headers properly.  
+
+3. **Knowledge gap in admins**  
+   - Network staff had decades of IPv4 training.  
+   - Misconfigurations common when shifting to IPv6.  
+
+4. **Lack of monitoring/analysis tools**  
+   - IPv6 traffic harder to inspect and log in early years.
+
+### 2011–2025: Adoption Growth
+- After 2011, gradual rollout by ISPs, CDNs, and device vendors.  
+- Google IPv6 adoption data (2009–2025):  
+  - 2011: ~0.2%  
+  - 2020: ~35%  
+  - 2025: ~48% (almost half of Google traffic is IPv6).  
+- Adoption continues to rise, driven by:  
+  - IPv4 exhaustion.  
+  - Mobile providers (4G/5G) going IPv6-first.  
+  - Cloud/data centers supporting dual-stack or IPv6-only setups.  
+
+![alt text](images/IPv6_Adoption.png)
 
 ### IPv4 header Vs. IPv6 header
 ![alt text](images/comparing-ipv4-and-ipv6-headers.png)
@@ -209,7 +275,7 @@ Always expands back to **8 groups** internally.
 
 ### 2.1 IPv4 Header
 - **Version** → always `4` for IPv4.  
-  - (Reminder: **Version 5** was already used in the 1980s/1990s for an **experimental streaming protocol** called ST2, defined in RFC 1190/1819. It never became mainstream, but since the number was taken, the next Internet Protocol became **IPv6**.)
+  - (**Version 5** was already used in the 1980s/1990s for an **experimental streaming protocol** called ST2, defined in RFC 1190/1819. It never became mainstream, but since the number was taken, the next Internet Protocol became **IPv6**.)
 - More **complex** and contains many fields that made sense in the 1980s but became inefficient later.
 - Key fields:
   - **IHL (Internet Header Length)** → tells how long the header is (because it can vary).
@@ -257,12 +323,37 @@ Always expands back to **8 groups** internally.
 
 👉 IPv6 is **leaner, cleaner, and optimized** for modern hardware.
 
----
+### 2.4 IPv6 Address Types by Prefix
+| Address Type        | Binary Prefix        | IPv6 Notation | Example | Real-life meaning |
+|---------------------|----------------------|---------------|---------|-------------------|
+| **Unspecified** (literally all zeros)     | 00…0 (128 bits)      | `::/128`      | `::`    | Used as “no address” (e.g., before an interface configures one). |
+| **Loopback** (“I’m talking to myself.”)       | 00…1 (128 bits)      | `::1/128`     | `::1`   | Like IPv4 `127.0.0.1`, used to test networking stack locally, it is sent out and immediately comes back in. |
+| **Multicast**       | 11111111             | `FF00::/8`    | `FF02::1` | Replaces IPv4 broadcast. Devices subscribe to groups like `ff02::1` (all nodes) or `ff02::2` (all routers) from the moment the interface(= your network card or port) comes up(=the operating system activates it and marks it as ready to send/receive traffic)|
+| **Link-Local Unicast** | 1111111010         | `FE80::/10`   | `fe80::1%eth0` | Always auto-assigned, used to talk to neighbors and discover routers. |
+| **Unique-Local Unicast (ULA)** | 1111110    | `FC00::/7`    | `fd12:3456:789a::1` | Like IPv4 private ranges (`192.168.x.x`), only routable inside private networks. |
+| **Global Unicast**  | everything else      | (commonly `2000::/3`) | `2001:4860:4860::8888` | Public Internet addresses (e.g., Google DNS). |
+
+#### Examples
+
+- `2001:DB8:0:0:8:0800:200C:417A` → **Global Unicast**  
+- `FF01:0:0:0:0:0:0:101` → **Multicast**  
+- `0:0:0:0:0:0:0:1` → **Loopback**  
+
+
+## Key Points
+
+- IPv6 addresses are categorized by their **prefix bits**.  
+- `/64` is the default subnet size (huge host ID space).  
+- Special cases:  
+  - `::/128` = unspecified  
+  - `::1/128` = loopback  
+- IPv6 **does not have broadcast** → replaced with multicast groups (`ff02::1`, `ff02::2`).  
+- Shortening rules keep addresses readable and consistent.  
 
 ## 3. Subnets 
 
 ### 3.1 What is a subnet?
-- A **subnet** = a block (or slice) of IP addresses that belong together.  ???????????????
+- A **subnet** = a block (or slice) of IP addresses that belong together.
 - Think of the IP universe as a giant street map, then:
     - Subnets = neighborhoods.  
 - Each subnet is defined by:
@@ -287,14 +378,58 @@ Always expands back to **8 groups** internally.
 [ 16 bits ][ 16 bits ][ 16 bits ][ 16 bits]|[host part begins         →               ]
 ```
   - `/64` = 64 bits are fixed for the network (the prefix given by ISP).  
-  - Remaining = 128 − 64 = 64 bits → 2⁶⁴ ≈ **18 quintillion host addresses**.  
+  - Remaining = 128 − 64 = 64 bits → 2⁶⁴ ≈ **18 quintillion possible addresses per subnet**.  
 - Hosts range from `2001:0db8:abcd:0000:0000:0000:0000:0000` up to `2001:db8:abcd::ffff:ffff:ffff:ffff`.  
 - In other words, the neighborhood is defined by the prefix, but there are an enormous number of possible “house numbers” (host IDs).
 
 ---
+### 3.4 How Host IDs Are Assigned
+
+Up to now we said:  
+- An IP address = **[network prefix] + [host ID]**. This is CIDR notation (Classless Inter-Domain Routing).
+- The prefix is fixed (defines the subnet).  
+- The host ID varies (defines the individual device).  
+
+But: **who assigns the host ID?**  
+It depends on IPv4 vs IPv6.
+
+---
+
+#### IPv4 Host IDs
+- In IPv4, the **router** usually assigns host IDs via **DHCP (Dynamic Host Configuration Protocol)**.  
+- Example in `192.168.0.0/24`:  
+  - Laptop gets `.15`  
+  - Phone gets `.20`  
+  - Printer gets `.50`  
+- The router picks numbers from the available pool and hands them out to devices when they join the LAN.  
+- If two devices accidentally got the same host ID → conflict (they couldn’t both work).  
+
+---
+
+#### IPv6 Host IDs
+- Your ISP assigns your **router** a whole **prefix** (e.g., `2001:db8:abcd::/56`).  
+- That prefix defines the **network part** of IPv6 addresses in your home/office.  
+- The router splits this into `/64` subnets and **advertises those prefixes** to devices (via *Router Advertisements*).  
+- Each device then **generates its own host ID** inside that prefix.  
+- Result: each device creates its **own full Global Unicast address**.  
+- Because IPv6 has such a huge address space, there is **no NAT needed** (unlike IPv4).  
+
+✅ **Important points:**  
+- The router only hands down the **prefix**.  
+- The device itself always generates the **host ID**.  
+- The router never assigns the full global IPv6 address directly.  
+
+- IPv6 mandates that a subnet must be at least `/64`.  
+- In other words:  
+  - **First 64 bits** = prefix (from ISP, passed via router).  
+  - **Last 64 bits** = host ID (device decides).  
+
+### Two approaches for host ID generation:
+1. **Early method:** Host ID derived from device’s MAC address (**EUI-64**).  
+2. **Modern method:** Host ID chosen randomly (privacy extensions).
+👉 This explains why MAC addresses enter the picture next: because IPv6 originally tied the host ID generation directly to the hardware MAC:
 
 ## 4. MAC Addresses and IPv6 Host IDs
-
 ### 4.1 What is a MAC address?
 - **MAC = Media Access Control address.**  
 - A unique hardware ID burned into every network interface (Wi-Fi card, Ethernet port, etc.).  
@@ -302,8 +437,6 @@ Always expands back to **8 groups** internally.
 `00:1A:2B:3C:4D:5E`
 - Think of it like your device’s **serial number for networking**.  
 - Unlike IP addresses (which change depending on network), MAC addresses are fixed to the hardware.
-
----
 
 ### 4.2 How IPv6 uses MAC for host IDs (early method)
 - Recall: an IPv6 address = **[network prefix] + [host ID]**.  
@@ -318,9 +451,6 @@ Always expands back to **8 groups** internally.
   ```
   2001:db8:abcd:1234:021a:2bff:fe3c:4d5e
   ```
-
----
-
 ### 4.3 Modern IPv6 host IDs
 - To avoid predictability and privacy issues, modern IPv6 devices use **random host IDs** instead of embedding the MAC.  
 - Example:
@@ -331,20 +461,12 @@ Always expands back to **8 groups** internally.
 
 ---
 
-### 4.4 Connection between Subnets and MAC
-- **Subnet = prefix (given by ISP) + host ID space (chosen by devices).**  
-- In IPv6, the host ID could originally be generated from the **MAC address** (EUI-64).  
-- Today, most devices instead use **random host IDs**, but the split between prefix and host ID is the same.  
-- So:  
-- ISP defines the **neighborhood** (prefix).  
-- Device chooses its **house number** (host ID).  
-- Early on, the house number was derived from the MAC; now it’s usually random.
-
 ## 5. Attacks and Scanning in IPv4 vs IPv6
 
 ### 5.1 Why attackers scan
-- Attackers cannot exploit what they cannot find.  
-- First step = **reconnaissance**: discover which devices (hosts) are online.  
+- Attackers cannot exploit what they cannot find.
+- To build a **botnet** (network of compromised computers (bots) controlled by an attacker, often used for DDoS, spam, or malware spreading), attackers first need to **discover active hosts** (computers, IoT devices, servers).  
+- First step = **reconnaissance**: This is done through **host scanning** → sending probes to IP addresses in order to see who responds.  
 - Next steps = probe (send crafted packets to) those devices for entry points (ports and services).  
 - Final goal = exploit a weakness:
   - Steal data (credentials, personal info, business secrets).  
@@ -447,7 +569,7 @@ Always expands back to **8 groups** internally.
 - In production, reverse proxies are standard; for testing, tunneling tools are common.
 ---
 
-### 5.6 Scanning Workflow (IPv4)
+### 5.6 IPv4 Scanning
 
 1. **Host discovery (which devices exist in a subnet):**  
    - Send ICMP Echo (“ping”) or TCP SYN probes.  
@@ -468,9 +590,9 @@ Your laptop (IP: 84.156.221.42, port 52314)
 >#### Why scanning ports matters
 >- Each open port = one program actively **listening** for connections.  
 >- Attackers probe ports to discover:
-  >- Which services are exposed (HTTP, SSH, databases).  
-  >- Which versions they run.  
-  >- Whether those versions have known vulnerabilities.
+>   - Which services are exposed (HTTP, SSH, databases).  
+>   - Which versions they run.  
+>   - Whether those versions have known vulnerabilities.
 
 >👉 With this context in place, we can now look at the details:  
 
@@ -509,18 +631,49 @@ For each live host, attackers scan ports 0–65535:
 ---
 
 ### 5.7 IPv6 Scanning
-
-- A `/64` subnet has 2⁶⁴ ≈ 18 quintillion possible host IDs.  
-- Brute-forcing every address = computationally impossible.  
+- Since IPv6 mandates that a subnet must be at least `/64`:
+- And a `/64` subnet has 2⁶⁴ ≈ 18 quintillion possible host IDs.  
+  - Brute-forcing every address = computationally impossible = **Blind Scanning is Impractical**
 
 **But once an IPv6 address is known, port scanning works exactly the same.**  
 - Host discovery is the hard part.  
-- Port → Service → Version → Vulnerability → Exploit sequence doesn’t change.  
+- ***Port → Service → Version → Vulnerability → Exploit*** sequence doesn’t change.
 
-Ways attackers find IPv6 hosts without brute-forcing:
-- **Predictable host IDs** (EUI-64 MAC-based or simple numbers).  
-- **DNS AAAA records** revealing IPv6 addresses.  
-- **Local subnet multicast** (if attacker is already inside the LAN).  
+### 6.4 Practical Shortcuts Attackers Use
+
+Since blind scans don’t work, attackers use **smarter techniques**:
+
+1. **Predictable Host IDs**
+ - Early IPv6 devices used **MAC-based host IDs (EUI-64)**.  
+ - If the attacker knows the vendor prefix of the MAC (e.g., Apple, Intel), they can guess likely addresses.  
+ - Manually chosen host IDs are also easy to guess:
+   - `::10`, `::20`, `::100`  
+   - Embedded IPv4 addresses (e.g., `::192.168.0.10`).  
+
+2. **DNS Resolution**
+ - Many services publish their IPv6 addresses in DNS (AAAA records).  
+ - For example run *dig* (Domain Information Groper) on your own computer:
+   ```
+   dig AAAA facebook.com
+   ```
+   👉 That’s Facebook’s IPv6 address.
+ - That means attackers don’t need to brute-force 2⁶⁴ possibilities; the IPv6 address is public knowledge.
+
+> **But**: discovery is only step 1. Knowing an IP doesn’t mean you can break into it. What really matters is **what’s listening on that IP**.
+
+3. **Local Access Attacks**
+ - If an attacker is already inside the LAN (infected laptop, rogue Wi-Fi user), discovery becomes trivial:
+   - **Multicast groups (RFC 2375):**
+     - `FF02::1` → All Nodes  
+     - `FF02::2` → All Routers  
+     - `FF05::3` → All DHCP Servers  
+     → One packet reveals all participants.  
+   - **Fake Router Advertisements (RAs):**
+     - Attacker pretends to be a router, tricks devices into revealing themselves.  
+   - **Sniffing Duplicate Address Detection (DAD):**
+     - When a device joins, it announces “I want to use this address; anyone else?”  
+     - Attacker can listen and harvest active host IDs.  
+  
 
 ---
 
@@ -548,3 +701,106 @@ But:
 - Ports = entry points into services. “Listening” means a program is actively waiting on that port.  
 - IPv4 scanning is trivial; IPv6 brute-force scanning is impossible, but shortcuts exist.  
 - Dual stack = attackers will use whichever address family is easier. Today that’s often IPv4.
+
+---
+# IPv6 - Address Types
+
+IPv6 addresses are categorized into **three fundamental types**. Each type defines **who receives a packet** when you send it.
+
+## 1. Unicast (One-to-One)
+
+A **unicast address** identifies a single interface. Packets sent to a unicast go to exactly **one device**.
+
+### Subtypes of Unicast
+
+1. **Global Unicast**  
+   - **Prefix:** `2000::/3`  
+   - **Scope:** The entire Internet  
+   - **Routable:** Globally 🌐 
+   - **Analogy:** International phone number (works everywhere)  
+   - **Examples:**  
+     - Google DNS → `2001:4860:4860::8888`  
+     - Cloudflare DNS → `2606:4700:4700::1111`  
+   - **Real-life:** When you browse `https://google.com`, your computer’s **global unicast** is the source address used to reach Google’s **global unicast servers**.
+
+2. **Link-Local Unicast**  
+   - **Prefix:** `fe80::/10`  
+   - **Scope:** Valid only on the *local link* (one Ethernet segment or Wi-Fi network)  
+   - **Routable:** Never forwarded by routers ❌ 
+   - **Analogy:** Room number inside one apartment (only meaningful if you’re already inside that apartment)  
+   - **Examples:**  
+     - `fe80::1a2b:3c4d:5e6f:7g8h%eth0`  
+   - **Real-life:**  
+     - Every IPv6 interface automatically configures a link-local address.  
+     - Used for router discovery and neighbor discovery.  
+     - Example: When your laptop boots(starts up), it automatically assigns itself a link-local address. It uses this to ask: “Hey, who is the default router?” (This “asking” happens with a special kind of message called **ICMPv6 Neighbor Discovery**):
+      1. Laptop boots → generates `fe80::…` (Host ID from MAC or random).  
+      2. Laptop sends a **Router Solicitation** to the multicast `ff02::2` (all routers).  
+      3. Router replies from its own **Link-Local** (e.g. `fe80::1`), saying: *“I am your default gateway, and here’s the global prefix you should use.”*  
+      4. Only **after this exchange** does the laptop create its Global Unicast address.  
+
+  ⚠️ **SO**:
+  - the **Link-Local prefix is fixed (`fe80::/10`)** and the device always self-assigns it.  
+  - The router only hands down the **global prefix** later.
+
+3. **Unique-Local Unicast (ULA)**  
+   - **Prefix:** `fc00::/7` (in practice `fdxx::/8`)  
+   - **Scope:** Private networks  
+   - **Routable:** Inside private network, Never on Internet  
+   - **Analogy:** Company’s internal phone extension (works across office buildings, but not outside)  
+   - **Examples:**  
+     - `fd12:3456:789a::1` (internal database server)  
+   - **Real-life:**  
+     - A company uses ULA for file servers, printers, or intranet services.  
+     - These addresses are reachable across internal routers but invisible to the outside world.
+
+### ✅ Quick Recap Table
+
+| Type           | Prefix       | Scope        | Routed?            | Example                  | Analogy                        |
+|----------------|-------------|--------------|--------------------|--------------------------|--------------------------------|
+| Global Unicast | `2000::/3`  | Internet     | Global           | `2001:4860:4860::8888`   | International phone number     |
+| Link-Local     | `fe80::/10` | One link     | Never forwarded  | `fe80::1%eth0`           | Room # inside an apartment     |
+| Unique-Local   | `fdxx::/8`  | Private net  | Inside private   | `fd12:3456:789a::1`      | Company phone extension        |
+
+## 2. Multicast (One-to-Many)
+
+A **multicast address** identifies a group of interfaces. Packets sent to a multicast are delivered to **all members of the group**. (⚠️ IPv6 has **no broadcast at all**)
+
+- **Prefix:** `ff00::/8`  
+- **Scope:** Defined by flags, common ones include:  
+  - `ff02::1` → All nodes on the local link  
+  - `ff02::2` → All routers on the local link  
+- **Real-life:**  
+  - Your laptop multicasts to `ff02::2` (all routers) to ask: *“Who is my default router?”*  
+  - Streaming applications can use multicast to send one stream to many clients.
+
+
+## 3. Anycast (One-to-Nearest)
+
+An Anycast address can be used by **multiple machines** at the same time. But when you send a packet to that address, only **one machine** receives it, the one that is **closest** according to the routing system. This is different from multicast (many receivers) and unicast (exactly one fixed receiver).
+
+- **Prefix:** None special (looks like unicast)  
+- **Scope:** Usually global  
+- **Analogy:** Toll-free number (you always reach the nearest call center)  
+- **Real-life:**  
+  - Root DNS servers → e.g. `2001:500:2f::f` is advertised from many locations worldwide. You always connect to the closest one.  
+  - Google DNS (2001:4860:4860::8888) is anycasted, so you automatically hit the closest Google data center.
+
+
+## Big Picture Summary
+
+- **Unicast (one-to-one):**  
+  - **Global (`2000::/3`)** → Internet-wide, routable everywhere (e.g. Google DNS `2001:4860:4860::8888`).  
+  - **Link-Local (`fe80::/10`)** → mandatory, always created on boot, valid only on the local link, never forwarded. Used first to find the router.  
+  - **Unique-Local (`fdxx::/8`)** → private networks, routable only internally (like IPv4 private ranges).  
+
+- **Multicast (one-to-many):** replaces IPv4 broadcast. Devices auto-join groups like:  
+  - `ff02::1` → all nodes on the link (“Hey, every IPv6 device, listen up.”)  
+  - `ff02::2` → all routers on the link (“Hey, only the routers, I need you.”)  
+
+- **Anycast (one-to-nearest):** same address advertised by multiple servers, but only the closest responds (used by DNS root servers, CDNs, global DNS resolvers).  
+
+- **Every IPv6 interface always carries:**  
+  - **1× Link-Local address** (`fe80::…`),  
+  - **some Multicast memberships** (`ff02::1`, `ff02::2` if router),  
+  - **0 or more Global/ULA addresses** depending on the network.  
