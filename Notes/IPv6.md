@@ -293,37 +293,98 @@ Always expands back to **8 groups** internally.
 
 ---
 
-### 2.2 IPv6 Header
-- **Version** → always `6` for IPv6.  
-  - (Skips “5” because of ST2 experiment.)
-- Designed to be **simpler, fixed-size, and faster** for routers to handle.
-- Key fields:
-  - **Version** → always `6` for IPv6.
-  - **Traffic Class** → replacement of IPv4’s Type of Service (used for QoS/priority).
-  - **Flow Label** (new) → allows labeling of packet flows for special handling (e.g., streaming).
-  - **Payload Length** → size of the data after the header.
-  - **Next Header** → replacement of Protocol field; indicates TCP, UDP, ICMPv6, or an extension header.
-  - **Hop Limit** → replacement of TTL; decreases with each router hop.
-  - **Source Address** → sender’s IPv6 address (128 bits).
-  - **Destination Address** → receiver’s IPv6 address (128 bits).
+#### 2.2.1 IPv6 Base Header Fields (40 Bytes)
 
-👉 Result: IPv6 header is **fixed-size (40 bytes)**, easier for routers to parse, and puts optional/rare features into **extension headers** instead of bloating the base header.
+The IPv6 base header is **fixed-length (40 bytes)** and much simpler than the variable IPv4 header. Each IPv6 header is made up of two big addresses (source(16 byte = 128 bit) + destination(16 byte = 128 bit)) plus some small control fields.  
+
+- **Version (4 bits)**  
+  - Always `6` for IPv6.  
+
+- **Traffic Class (8 bits)**  
+  - Similar to IPv4’s Type of Service field, used for QoS (Quality of Service).  
+  - Allows marking packets for priority handling.  
+  - Example values:  
+    - `0–7`: lower-priority traffic (can be delayed if congested).  
+    - `8–15`: higher-priority, constant-rate traffic (e.g. voice/video streaming).  
+
+- **Flow Label (20 bits)**  
+  - New in IPv6.  
+  - Identifies packets that belong to the same “flow” (e.g., one video stream, one voice call).  
+  - Allows routers to recognize and keep special handling for flows requiring specific QoS.  
+  - **Note:** Still rarely used in real-world networks; many routers ignore it.  
+
+- **Payload Length (16 bits)**  
+      - **Definition:**  
+      A **number** that specifies the size of the payload in **bytes**.  
+      It tells the receiver: *“How many bytes follow the 40-byte IPv6 base header.”*  
+
+    - **What it measures:**  
+      - Extension headers (if any) ✅ 
+      - Transport layer data (TCP, UDP, ICMPv6, etc.) ✅ 
+      - Does **not** include the IPv6 base header itself (40 bytes) ❌ 
+      - Does **not** include the Source/Destination addresses (they are part of the 40-byte base header) ❌   
+
+    - **Range:**  
+      - Payload Length field = 16 bits → can represent `2^16 = 65,536` values.  
+      - Range = 0 … 65,535 (since counting starts at 0).  
+      - Max Payload Length = **65,535 bytes**.  
+      - Example: if field = `0xFFFF` (65,535), then:
+      ````
+        Total packet size = 40 (header) + 65,535 (payload) = 65,575 bytes
+      ````
+      **OR**  
+      - If `Payload Length = 0x0020` (32 in decimal), it means:  
+        → *There are exactly 32 bytes of data after the header.*  
+      - To compute the **total IPv6 packet size**:  
+        ```
+        Total Length = 40 (base header) + Payload Length
+        ```
+      - For larger payloads, IPv6 uses the **Jumbo Payload** option (up to ~4 GB).  
+
+    - **Comparison with IPv4:**  
+      - IPv4 used a **Total Length field** (header + payload together).  
+      - IPv6 simplified it: **Payload Length** = only the part after the header, since the header is always fixed at 40 bytes.
+
+    ✅ The **Payload Length field is not the content itself**. It is a **counter** describing the size of the content (in bytes).  
+
+- **Next Header (8 bits)**  
+  - Replaces IPv4’s Protocol field.  
+  - Identifies the type of header that follows the IPv6 header.  
+  - Can indicate:  
+    - A transport-layer protocol (e.g., TCP = 6, UDP = 17, ICMPv6 = 58).  
+    - Or an IPv6 extension header (e.g., routing header, fragmentation header).  
+
+- **Hop Limit (8 bits)**  
+  - Replaces IPv4’s TTL(Time To Live)  
+  - When a device (like a laptop) sends an IPv6 packet, it sets a Hop Limit value in the header. Example: 64. Each time the packet passes through a router, the router subtracts 1 from that value.
+  - If the Hop Limit reaches 0, the router discards the packet and usually sends back an ICMPv6 “Time Exceeded” error.
+  - Its job: prevent packets from circulating endlessly in the network if there’s a routing loop.
+
+- **Source Address (128 bits)**  
+  - The sender’s IPv6 address.  
+
+- **Destination Address (128 bits)**  
+  - The intended recipient’s IPv6 address.  
 
 ---
 
-### 2.3 Key Differences
-- IPv6 removes many IPv4 fields:
-  - No Header Checksum (error detection is handled elsewhere).
-  - No Fragmentation fields (handled differently).
-  - No Options in the main header (moved to extension headers).
-- IPv6 adds:
-  - **Flow Label** (new concept for traffic flows).
-- IPv6 keeps:
-  - Source/Destination addresses, TTL (renamed Hop Limit), Protocol (renamed Next Header).
+#### 2.2.2 Key Differences to IPv4
 
-👉 IPv6 is **leaner, cleaner, and optimized** for modern hardware.
+- IPv6 header = **fixed 40 bytes**, IPv4 header = variable (20–60 bytes).  
+- Removed:  
+  - Header checksum (error detection handled by upper layers and link layer).  
+  - Fragmentation fields (done differently in IPv6, only endpoints can fragment, not routers).  
+  - Options (moved to extension headers).  
+- Added:  
+  - Flow Label (for special traffic flows).  
+- Renamed:  
+  - TTL → Hop Limit.  
+  - Protocol → Next Header.  
+
+👉 Result: IPv6 header is **leaner, faster to process**, and scales better.
 
 ### 2.4 IPv6 Address Types by Prefix
+**Der Typ einer IPv6-Adresse wird durch die high-order Bits(leftmost bits) bestimmt**
 | Address Type        | Binary Prefix        | IPv6 Notation | Example | Real-life meaning |
 |---------------------|----------------------|---------------|---------|-------------------|
 | **Unspecified** (literally all zeros)     | 00…0 (128 bits)      | `::/128`      | `::`    | Used as “no address” (e.g., before an interface configures one). |
@@ -803,4 +864,124 @@ An Anycast address can be used by **multiple machines** at the same time. But wh
 - **Every IPv6 interface always carries:**  
   - **1× Link-Local address** (`fe80::…`),  
   - **some Multicast memberships** (`ff02::1`, `ff02::2` if router),  
-  - **0 or more Global/ULA addresses** depending on the network.  
+  - **0 or more Global/ULA addresses** depending on the network. 
+
+---
+# Maximum Transmission Unit (MTU)
+
+#### What is MTU?
+When data travels over a network, it moves **link by link**.  
+A ***link*** is simply the local network segment where devices can talk directly: like all machines on the same Wi-Fi network (SSID, Service Set Identifier = name of a Wi-Fi network) or all devices plugged into the same Ethernet switch. Each link type has its own physical or technical limits, and one of the most important is how large a **single packet** can be carried in one piece.  
+
+This limit is the **Maximum Transmission Unit (MTU)**, measured in **octets** (8-bit bytes). Networking standards use "octet" for precision, since historically "byte" wasn’t always fixed at 8 bits.  
+
+#### The IPv6 rule
+- Every link that supports IPv6 must be able to carry a packet of at least **1280 octets**.  
+- This number is not random:  
+  - It’s big enough to carry useful payloads (TCP/UDP data + headers).  
+  - It’s small enough that even constrained links (like low-power IoT radios) can handle it by performing their own fragmentation beneath IPv6. 
+  - If a link technology cannot handle 1280 octets directly (e.g., **IEEE 802.15.4**, which supports only 127 bytes per frame), then it must provide **fragmentation and reassembly below IPv6**(the link layer technology is doing the chopping and reassembling, not IPv6).
+  - From IPv6’s point of view, the packet is still 1280 bytes; the link layer secretly splits/reassembles it.  
+ 
+
+#### IPv4 vs IPv6: Why 1280?
+
+- **IPv4 approach:**  
+  - When a packet was too large for the next link, the router itself would split it into smaller fragments.  
+  - This kept things working, but it burdened routers with extra work (fragmentation + reassembly) and made networks less efficient.  
+
+- **IPv6 redesign:**  
+  - Routers never fragment packets anymore. Their job is to forward fast.  
+  - The responsibility shifts to the **end host (sender)**:  
+    - The sender must size packets so that they fit the smallest MTU along the path.  
+    - If a packet is too big, the router discards it and replies with an **ICMPv6 “Packet Too Big”** message containing the supported MTU.  
+    - The sender then adjusts its packet size accordingly.  
+
+- **The guaranteed minimum:**  
+  - To ensure that any two IPv6 hosts can always communicate, regardless of the underlying link technology, IPv6 defines a universal floor: **1280 bytes**.  
+  - Any link technology that cannot natively handle 1280 must emulate it by fragmenting and reassembling *below IPv6*, so IPv6 itself always sees a minimum MTU of 1280.  
+
+#### Payload Length vs MTU
+- **Payload Length** (field in the IPv6 header) tells how many bytes this *specific packet* carries after the 40-byte base header.  
+- **MTU** (property of the link) is the maximum size of a packet that can pass across that segment.  
+
+The rule is simple: `40 (header) + Payload Length ≤ MTU of the link`
+If a packet doesn’t fit, it gets dropped, and the sender must adapt.  
+
+#### Path MTU Discovery (PMTUD)
+- To avoid guessing, IPv6 nodes use PMTUD (RFC 8201).  
+- Mechanism:  
+  - Sender transmits a packet.  
+  - If it’s too big for some link, the router discards it and returns an ICMPv6 “Packet Too Big” with the supported MTU.  
+  - Sender then shrinks future packets accordingly.  
+- For multicast: since packets may take multiple paths, each with a different MTU, the effective size is the **minimum MTU across all paths**.  
+
+#### Key takeaway:  
+IPv6 makes end hosts responsible for ensuring packets fit the smallest MTU along the path.  
+The fixed lower bound of **1280 bytes** guarantees that, no matter the technology, IPv6 packets can always make it through.
+
+# Next Header & Extension Headers in IPv6
+
+IPv6 keeps its **Base Header fixed at 40 bytes** and very simple.  
+Optional or advanced features are not stuffed into the base header (like in IPv4), but placed into **Extension Headers**.  
+
+#### Next Header (field)
+- It exists in the IPv6 Base Header and in every Extension Header.
+- Tells what comes immediately after the current header.  
+- Two possibilities:  
+  1. **Transport protocol** (e.g. TCP, UDP, ICMPv6).  
+  2. **Another extension header**.  
+- Works like a **chain pointer**: each header points to the next one until the final payload is reached.
+#### Extension Header
+An Extension Header is an extra block of information that IPv6 can insert between the Base Header and the payload. It's an actual header structure (not just a field).
+#### Extension Header chaining
+- The Next Header field can point to:
+  1. A transport-layer protocol (like TCP, UDP, ICMPv6).
+  2. Or an Extension Header (like Routing, Fragment, Authentication).
+- If the Next Header points to an Extension Header → that header also contains a Next Header field, which points further down the chain.
+`[Base Header] → [Extension Header 1] → [Extension Header 2] → … → [Transport Data]`
+- Each extension header has its own **Next Header field**.  
+- The last extension header points to the transport layer data (TCP, UDP, …)
+- Like a Linked List:
+`Base Header (Next=43) → Routing Header (Next=44) → Fragment Header (Next=6) → TCP Segment`
+
+#### Common Extension Headers (RFC 8200, RFC 4302, RFC 8221)
+
+| Next Header Value | Extension Header              | Purpose |
+|-------------------|-------------------------------|---------|
+| 0                 | Hop-by-Hop Options            | Options examined by every router along the path (rare, expensive). |
+| 43                | Routing (Type 0)              | Specifies a list of nodes to visit (like source routing). |
+| 44                | Fragment                      | Handles fragmentation by end hosts (routers never fragment in IPv6). |
+| 60                | Destination Options           | Extra info meant only for the destination node. |
+| 51                | Authentication (AH)           | Provides data origin authentication, integrity (IPsec). |
+| 50                | Encapsulating Security Payload (ESP) | Provides encryption + authentication (IPsec). |
+| 59                | No Next Header                | Marks end of the header chain (no payload follows). |
+
+#### Hop-by-Hop Options Header
+- Placed immediately after the Base Header if present.  
+- Contains information that **every router along the path** must examine.  
+- Examples:  
+- Jumbo Payload Option (RFC 2675)  
+- Padding (Pad1, PadN, RFC 2460)  
+- ⚠️ RFC 8200 update: In practice, routers often ignore hop-by-hop unless explicitly configured, because it slows down fast forwarding.  
+![alt text](images/IPv6_Extension_Header.png)
+ 
+- Contains options examined by every router on the path.  
+- Examples: Jumbo Payload option, Padding (Pad1, PadN).  
+- RFC 8200 update: routers only process Hop-by-Hop if explicitly configured, since it slows down fast packet forwarding.
+
+- **Routing Header**  
+  - Allows sender to specify intermediate nodes (source routing).  
+  - Deprecated Type 0 routing for security reasons (amplification / DoS risks).  
+  - Still supported for certain specialized uses.
+
+- **General Rules for Extension Headers**  
+  - Each extension header should appear at most once.  
+  - Exception: Destination Options may appear twice (once before Routing, once before Upper-Layer header).  
+  - Order matters: standardized processing sequence (Hop-by-Hop → Routing → Fragment → Destination → Security).  
+
+- **Firewall Note**  
+  - Firewalls and intrusion detection systems must filter out malformed or suspicious header chains.  
+  - Attackers may abuse unusual extension header combinations to bypass security devices.
+  ![alt text](images/IPv6Packet.png)
+  >Each extension header should occur at most once, except for the Destination Options header which should occur at most twice (once before a Routing header and once before the upper-layer header).
