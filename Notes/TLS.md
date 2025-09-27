@@ -56,7 +56,7 @@ That means:
     - **PGP/S/MIME** → encrypts/signs the *content itself* (end-to-end, independent of transport).
     - **DNSSEC** → protects DNS queries/answers.
 
-- TLS sits **on top of TCP** (or UDP for DTLS).
+- TLS sits **on top of TCP** (or UDP for DTLS). Sometimes people call it “Layer 4.5.”
 - From TCP’s view, TLS is “just another application protocol.”
 - Applications (HTTP, SMTP, IMAP, etc.) send data **inside TLS records**.
 #### Without TLS (plaintext):
