@@ -390,8 +390,8 @@ Imagine you are working from home on your corporate laptop and connect to your c
 
 When you open a website or connect to a corporate file share, your laptop doesn’t just send packets directly. Every packet is checked against IPSec policy databases:
 
-* **SPD**: decides what to do with the packet (protect, bypass, or discard).
-* **SAD**: if protection is needed, find the right keys and algorithms.
+* **SPD**: decides what to do with the packet (**protect**, bypass, or discard).
+* **SAD**: if **protection** is needed, find the right keys and algorithms.
 * **IKEv2**: negotiates new SAs and installs them if not already present.
 * **SPI**: a label inside each IPSec packet so the receiver knows which SA to use.
 
@@ -399,7 +399,7 @@ This control is why sometimes corporate laptops can’t access certain websites 
 ![alt text](images/SA-SPD.png)
 ## 1) Security Association (SA)
 
-A **Security Association** is a one-way contract that defines how to protect IP traffic. Each SA includes:
+A **Security Association** is a one-way contract that defines how to **protect** IP traffic. Each SA includes:
 
 * Peer IP address (or network prefix if covering multiple hosts).
 * Protocol: **ESP (50)** or **AH (51)**.
@@ -422,29 +422,81 @@ A **Security Association** is a one-way contract that defines how to protect IP 
 
 ## 2) Security Policy Database (SPD)
 
-The **SPD** is a rulebook inside the IPSec stack. The SPD (Security Policy Database) is like a firewall ruleset, but instead of just “allow/deny,” it can say “protect with IPSec,” “bypass,” or “discard.”It decides what happens to packets:
 
-* **PROTECT:** use IPSec (ESP/AH) according to an SA.
-* **BYPASS:** send/receive in clear.
-* **DISCARD:** drop.
+The **SPD** is a rulebook inside the IPSec stack. Think of it as a firewall ruleset, but instead of just *allow/deny*, it can say:
+- **PROTECT** → use IPSec (ESP or AH) according to a Security Association (SA).
+- **BYPASS** → send/receive in clear.
+- **DISCARD** → drop the packet.
 
-### Example SPD entries
-To encrypt/authenticate with IPSec (ESP or AH), both sides need to agree on:
-- Which algorithms to use (AES, SHA, etc.)
+SPD entries decide what happens to outgoing or incoming packets.
+
+### Why SPD rules are needed
+To encrypt/authenticate with IPSec, both sides need to agree on:
+- Which algorithms to use (AES, SHA, etc.).
 - Which keys to use.
-But when you **first boot your laptop**, you **don’t have any IPSec keys yet.** So you need some way to set up those keys in the first place(first row):
-```
-UDP 1.2.3.101:500 ↔ *:500   BYPASS   (let IKE key exchange through)
-ICMP                    BYPASS   (allow ICMP for PMTU, diagnostics)
-* → 1.2.3.0/24          PROTECT: ESP transport (protect intranet)
-TCP → 1.2.4.10:80       PROTECT: ESP transport (secure HTTP to server)
-TCP → 1.2.4.10:443      BYPASS   (use TLS at higher layer)
-* → 1.2.4.0/24          DISCARD  (block other flows)
-* → *                   PROTECT: ESP tunnel (force all Internet traffic via VPN)
-```
 
-👉 If the last line says “all Internet traffic must go into the tunnel,” you might lose access to sites like `openai.com` if the corporate gateway doesn’t forward them.
+But when you first boot your laptop, you don’t have any IPSec keys yet. That’s the job of **IKE (Internet Key Exchange)**.  
+IKE is its own protocol, running over UDP port 500 (or 4500 with NAT). It negotiates algorithms and exchanges keys securely. Once IKE is finished, you have Security Associations (SAs) in the SAD, and IPSec can start encrypting traffic.
 
+That’s why the SPD has a rule like:
+
+> *“Packets for UDP port 500 (IKE) should bypass IPSec — send them in the clear.”*
+
+Without this, the VPN could never start (chicken-and-egg problem).
+
+### Example SPD Entries (Full Tunnel VPN design)
+
+| Rule | Meaning |
+|------|---------|
+| `UDP 1.2.3.101:500 ↔ *:500   BYPASS` | Allow IKE key exchange both ways, in clear. Necessary to bootstrap. |
+| `ICMP 1.2.3.101:* ↔ *:*   BYPASS` | Allow ICMP (ping, traceroute, Path MTU Discovery). Needed for diagnostics. |
+| `* 1.2.3.101:* → 1.2.3.0/24:*   PROTECT: ESP transport` | Encrypt intranet traffic (LAN-to-LAN). Payload is secured, header stays visible. |
+| `TCP 1.2.3.101:* → 1.2.4.10:80   PROTECT: ESP transport` | Secure traffic to internal HTTP server even if app doesn’t use HTTPS. |
+| `TCP 1.2.3.101:* → 1.2.4.10:443   BYPASS` | Let TLS do its job. Avoid double encryption for HTTPS. |
+| `* 1.2.3.101:* → 1.2.4.0/24:*   DISCARD` | Block all traffic to the DMZ subnet. |
+| `* 1.2.3.101:* → *:*   PROTECT: ESP tunnel` | Force **all other Internet traffic** through the VPN tunnel. |
+
+### *The DMZ (Demilitarized Zone)
+
+- A **DMZ** is a special subnet (like `1.2.4.0/24`) where semi-public servers live.
+- Examples: Web server (`www.company.com`), mail relay, DNS server.
+- These machines **must** be reachable from the Internet, so they are higher risk.
+- If a DMZ host is compromised, it should **not** be able to directly reach the LAN.
+
+### Why SPD discards DMZ traffic
+- This prevents corporate laptops from directly connecting to DMZ servers. 
+- Example: If you try to SSH into `1.2.4.15` from your laptop, the packet never leaves your machine — kernel drops it instantly.
+- Reason: DMZ is intentionally isolated. Only specific, tightly controlled flows are allowed (e.g., web traffic from Internet → DMZ web server). Employees should not directly access DMZ.
+
+**Core point:** The DISCARD rule enforces *network segmentation* — LAN and DMZ are kept apart.
+
+
+### Split Tunnel VPN
+
+Same rules as above, except the **last line** is different:
+
+| Rule | Meaning |
+|------|---------|
+| `* 1.2.3.101:* → *:*   BYPASS` | Let all Internet traffic go direct, unprotected. Only corporate subnets are protected. |
+
+- **Split Tunnel**: Faster, less VPN load. But Internet traffic (Google, OpenAI, YouTube, etc.) is not inspected or filtered by the company. Less safe.
+- **Full Tunnel**: More secure (all traffic forced through VPN → corporate firewall/monitoring), but slower and heavier load on the VPN gateway.
+
+### Split Tunnel Example
+- You connect to `https://openai.com`.
+- SPD says: destination IP not intranet, not DMZ (the destination you’re trying to reach is not inside the 1.2.4.0/24 subnet) → match catch-all `BYPASS`.
+- Traffic goes directly to the Internet, no IPSec.
+
+### Full Tunnel Example
+- Same connection to `https://openai.com`.
+- SPD says: destination is not intranet, not DMZ → match catch-all `PROTECT: ESP tunnel`.
+- Your laptop encapsulates traffic in IPSec, sends it to the VPN gateway.
+- The gateway forwards it to the Internet. If the gateway blocks OpenAI, you cannot reach it.
+
+### Takeaway
+- **Split tunnel**: Protects corporate traffic, Internet is free/unmonitored. (Convenient, fast, weaker control.)
+- **Full tunnel**: Protects *all* traffic, Internet included. (Stronger control, slower performance.)
+- **DMZ DISCARD**: Ensures laptops cannot talk to semi-public servers directly, maintaining a strict security boundary.
 
 ## 3) Security Association Database (SAD)
 
@@ -490,34 +542,52 @@ This tells the kernel: “Packets with Protocol=50 and SPI=0x12345678 use AES-GC
 * Runs over UDP 500 (or UDP 4500 with NAT-T).
 * Builds two types of SAs:
 
-  * **IKE SA:** protects the IKE negotiation itself.
+  * **IKE SA:** protects the IKE negotiation itself – after **IKE_SA_INIT** packets (UDP/500) where they exchange Diffie-Hellman values, nonces, algorithm proposals – Using Diffie–Hellman, both peers compute a shared secret. From that, they derive keys for IKE itself (encryption + integrity keys). Then they enter the IKE_AUTH phase.
+
   * **IPSec SAs:** installed into SAD for ESP/AH traffic.
 
-### Example flow (home laptop → company server)
+### Example flow (home laptop → company server, detailed)
 
-1. SPD says: traffic from `10.0.0.5` to `10.20.5.10` must be protected with ESP tunnel.
-2. Kernel checks SAD, finds no SA → triggers IKE.
-3. IKE negotiates algorithms + keys with gateway `198.51.100.1`.
-4. IKE installs new SA in SAD with SPI=0x12345678.
-5. Kernel sends packet:
+1. **Initial packet generation**
 
-   ```
-   Outer IP: 203.0.113.50 (NAT public) → 198.51.100.1 (VPN GW)
-   ESP hdr: SPI=0x12345678, Seq=42
-   Payload: (Encrypted inner packet 10.0.0.5 → 10.20.5.10)
-   ```
+   * Application on laptop (`10.0.0.5`) wants to reach corporate server (`10.20.5.10`).
+   * It generates a plain TCP/IP packet:
 
-## 6) Why NAT matters
+     ```
+     [ IP: 10.0.0.5 → 10.20.5.10 | TCP | Data ]
+     ```
 
-* **AH**: breaks with NAT, because AH authenticates IP headers which NAT rewrites.
-* **ESP transport**: fragile with NAT, since NAT can’t see ports; needs NAT-T (UDP encapsulation).
-* **ESP tunnel**: clean with NAT, only outer IP is changed, inner packet stays encrypted and intact.
+2. **SPD check**
 
-## 7) Real-World Impact (Why some websites fail on corporate laptops)
+   * The kernel checks the **Security Policy Database**.
+   * Policy says: *"Any traffic from 10.0.0.5 to 10.20.5.10 must be protected with ESP tunnel mode."*
+   * Therefore, this packet cannot go out in clear.
 
-* If SPD forces **all traffic** through VPN (full tunnel) but gateway doesn’t forward external sites → websites fail.
-* If SPD has **DISCARD** rules (e.g., block social media) → connections to those sites are silently dropped.
-* If SA expires in the SAD and IKE fails to renew → some traffic stops working until renegotiated.
+3. **SAD lookup**
+
+   * Kernel looks into the **Security Association Database** for an active SA covering this flow.
+   * Finds none → must establish one.
+
+4. **IKE negotiation (UDP/500, BYPASS)**
+
+   * Kernel triggers IKE daemon.
+   * Laptop (behind NAT, public IP = `203.0.113.50`) contacts VPN gateway (`198.51.100.1`) on **UDP port 500**.
+   * Exchange includes: supported algorithms, Diffie-Hellman values, nonces, authentication (cert/PSK).
+   * After negotiation, both sides derive shared keys.
+
+5. **SA installation**
+
+   * IKE installs a new **Security Association** into the SAD.
+   * Example entry:
+
+     ```
+     SPI = 0x12345678
+     Peer = 198.51.100.1
+     Protocol = ESP
+     Enc = AES-GCM
+     Key = abcdef...
+     Lifetime = 3600s
+     ```
 
 ✅ **Core takeaway:**
 
@@ -527,3 +597,333 @@ This tells the kernel: “Packets with Protocol=50 and SPI=0x12345678 use AES-GC
 * **SPI = packet tag to look up SA.**
 * **IKE = negotiator that creates SAs dynamically.**
 * **Corporate side effect:** strict SPD policies are why some websites don’t work on a VPN-connected laptop.
+
+## Security Associations (SA), Manual Config vs IKE
+- **Two ways to establish Security Associations (SAs):**
+  1. **Manual configuration**  
+     - Admin defines algorithms, keys, SPIs in a config file.  
+     - Inflexible: if a key needs to change, both ends must be reconfigured manually.  
+     - Useful only for demos or lab setups.  
+  2. **Automatic negotiation with IKE (Internet Key Exchange)**  
+     - Runs over UDP/500 (or UDP/4500 with NAT).  
+     - Negotiates algorithms, authenticates peers, performs Diffie–Hellman.  
+     - Dynamically installs SAs into the SAD.  
+     - Supports automatic key rollover (re-keying).
+![alt text](images/SAD+SPD.png)  
+
+## Example: Manual configuration
+
+From the slide:
+
+```bash
+# AH Security Associations
+add 3.0.0.1 5.0.0.1 ah 700 -A hmac-md5 0xbf9a081e7ebdd4fa824c822ed94f5226;
+add 5.0.0.1 3.0.0.1 ah 800 -A hmac-md5 0xbf9a081e7ebdd4fa824c822ed94f5226;
+
+# ESP Security Associations
+add 3.0.0.1 5.0.0.1 esp 701 -E 3des-cbc 0x3f0b868ad03e68acc6e4e4644ac8bb80ecea3426d3d30ada;
+add 5.0.0.1 3.0.0.1 esp 801 -E 3des-cbc 0x3f0b868ad03e68acc6e4e4644ac8bb80ecea3426d3d30ada;
+
+# SPD rules: require IPSec for all traffic between the hosts
+spadd 3.0.0.1 5.0.0.1 any -P out ipsec
+   esp/transport//require
+   ah/transport//require;
+
+spadd 5.0.0.1 3.0.0.1 any -P in ipsec
+   esp/transport//require
+   ah/transport//require;
+```
+**Explanation**
+
+- Hosts: 3.0.0.1 and 5.0.0.1.
+
+- SAs defined for both directions (A→B and B→A).
+
+> Eine Security Association ist immer unidirektional und nur für ein IPsec-Protokoll gültig.
+
+- AH entries (700, 800): provide authentication & integrity (HMAC-MD5).
+
+- ESP entries (701, 801): provide encryption (3DES-CBC).
+
+- SPD rules: enforce that all traffic between these two hosts must use AH and ESP in transport mode.
+
+**Security Association properties:**
+
+- **Unidirectional**: One SA per direction.
+
+    3.0.0.1 → 5.0.0.1 uses SPI=700 (AH) + 701 (ESP).
+
+    5.0.0.1 → 3.0.0.1 uses SPI=800 (AH) + 801 (ESP).
+
+- Protocol-specific: An SA is valid for either AH or ESP, not both.
+
+- Identified by SPI:
+
+> The receiver checks the SPI in the ESP/AH header, not the IP addresses. This is faster: one direct lookup into the SAD. IPs are still used to scope policies (in SPD), but data-plane packet processing uses SPI first. 
+
+Manual setup shows how IPSec glues together: SAs, SPIs, keys, algorithms.
+Real-world deployments use IKE to negotiate these automatically.
+
+
+# Cryptographic Algorithms and RFC Guidance for IPSec
+
+## Algorithm Requirements (RFC history)
+- **RFC 4303** (2005): Base specification for ESP.
+- **RFC 4305** (2005): Algorithm requirements for ESP and AH.  
+- **RFC 4835** (2007), **RFC 7321** (2014), **RFC 8221** (2017): Updated requirements.  
+- **RFC 9395** (2023): Deprecates IKEv1 and several older ciphers (RC5, IDEA, CAST, Blowfish, 3IDEA, ENCR_DES_IV64, ENCR_DES_IV32).  
+- **RFC 6071** (2011): “IPsec Roadmap” that summarizes the whole RFC landscape.
+
+👉 The rules for which algorithms must be supported are separated from ESP/AH itself, so they can evolve independently.
+
+
+## Changes and Recommendations
+- **AH**:
+  - Mandatory in IPSec-v2.
+  - Optional in IPSec-v3.  
+  - Modern deployments mostly rely on ESP (with built-in integrity options).
+- **ESP**:
+  - Supports “combined mode” algorithms that provide **encryption + integrity in one step** (e.g. AES-GCM).
+
+## Current Guidance (RFC 8221, 2017)
+- **Manual keying SHOULD NOT be used**:
+  - No Perfect Forward Secrecy (PFS).
+  - No guarantee of SPI uniqueness.
+  - No automatic key rollover.
+  - IPSec should be deployed with **IKEv2 [RFC 7296]** or higher.
+- **Encryption without authentication MUST NOT be used**:
+  - Encrypting without integrity protection is insecure.
+
+## 3 Recommended Modes of ESP Use
+
+1. **ESP with AEAD cipher (Authenticated Encryption with Associated Data)**
+   - **Modern, fast, recommended.**
+   - One algorithm provides both encryption and integrity.
+   - Examples:  
+     - `ENCR_AES_GCM_16`  
+     - `ENCR_CHACHA20_POLY1305`
+   - Authentication algorithm is set to `none` (already included in AEAD).
+
+2. **ESP with non-AEAD cipher + separate authentication**
+   - **Traditional approach, slower.**
+   - Needs two passes over the data:
+     - One for encryption (e.g. AES-CBC).
+     - One for authentication (e.g. HMAC-SHA2).
+   - Example:  
+     - `ENCR_AES_CBC` + `AUTH_HMAC_SHA2_512_256`.
+
+3. **ESP with non-AEAD cipher + AH with authentication**
+   - **Not recommended.**
+   - Requires both ESP and AH headers (more overhead).
+   - Slowest, wastes space.
+   - Example:  
+     - ESP with `ENCR_AES_CBC` + AH with `AUTH_HMAC_SHA2_512_256`.
+
+## Tangible takeaway
+- **Old ciphers (RC5, Blowfish, etc.) are dead** — removed by RFC 9395.  
+- **ESP with AEAD (AES-GCM, ChaCha20-Poly1305)** is today’s best practice.  
+- **AH is rarely used** now, since ESP can handle both encryption and integrity.  
+- **IKEv2 is mandatory** in practice → no manual keys.  
+
+👉 If you deploy IPSec today, you’ll almost always see **ESP + AES-GCM with IKEv2**.
+
+# Internet Key Exchange (IKE) – Focus on IKEv2
+
+![alt text](images/IKEv2.png)
+
+> IKEv2 is to IPSec what TLS is to HTTPS:
+- Both start with a handshake (negotiate algorithms, exchange keys).
+- Both authenticate peers (certificates or PSK).
+- Both derive session keys for bulk encryption.
+- After that, the real traffic flows securely.
+
+> IKE is the **control-plane protocol** of IPSec.  
+- **Why:** SPD may require IPSec, but if no SA exists in the SAD, IKE must negotiate one.  
+- **Result:** IKE sets up Security Associations (SAs), installs keys, and defines algorithms.  
+- **Data protection (ESP/AH)** then relies on these SAs.
+
+## Evolution
+- **IKEv1 (RFC 2409, 1998):** deprecated (RFC 9395, 2023).  
+- **IKEv2 (RFC 4306, 2005 → RFC 5996, 2010 → RFC 7296, 2014):** current standard.  
+- Not backward-compatible with IKEv1.  
+
+## Security mechanisms in IKEv2
+- **Diffie–Hellman / Elliptic Curve Diffie–Hellman:** creates a shared secret.  
+- **Authentication:**  
+  - PKI with digital certificates (recommended).  
+  - Or Pre-Shared Keys (simpler, less scalable).  
+- **Replay defense:** uses nonces.  
+- **Integrity of handshake:** all messages after the first exchange are protected by encryption + MAC.  
+
+## IKEv2 Exchange Structure
+IKEv2 always works in **pairs of messages** (Initiator → Responder → back).
+
+### (a) Initial Exchange (IKE_SA_INIT + IKE_AUTH)
+- **Message 1:** Initiator → Responder  
+  - Proposes algorithms, sends nonce `Ni`, DH value `KEi`.  
+  - (`HDR, SAi1, KEi, Ni`)  
+
+- **Message 2:** Responder → Initiator  
+  - Chooses algorithms, sends nonce `Nr`, DH value `KEr`, optionally certificate request.  
+  - (`HDR, SAr1, KEr, Nr, [CERTREQ]`)  
+
+- **Message 3:** Initiator → Responder  
+  - Sends ID and authentication data.  
+  - Two possible modes:  
+    - **With PKI:** `IDi, CERT, AUTH (signature proving possession of private key)`  
+    - **With PSK:** `IDi, AUTH (computed with PSK, no CERT)`  
+  - Also includes traffic selectors (TSi, TSr).  
+  - (`HDR, SK {IDi, [CERT], AUTH, SAi2, TSi, TSr}`)  
+
+- **Message 4:** Responder → Initiator  
+  - Sends ID and authentication data.  
+  - Two possible modes:  
+    - **With PKI:** `IDr, CERT, AUTH (signature)`  
+    - **With PSK:** `IDr, AUTH (computed with PSK)`  
+  - Confirms traffic selectors.  
+  - (`HDR, SK {IDr, [CERT], AUTH, SAr2, TSi, TSr}`)  
+
+✅ Result: **IKE SA established**. All further IKE messages are encrypted.
+
+### (b) CREATE_CHILD_SA Exchange
+- Used to create the actual IPSec SAs (ESP or AH).  
+- Can also re-key existing SAs.  
+- Example message:  
+  - (`HDR, SK {SA, Ni, [KEi], TSi, TSr}`)  
+
+### (c) Informational Exchange
+- Management messages: delete an SA, error notifications, keepalives.  
+- Example message:  
+  - (`HDR, SK {N, D, CP}`)  
+
+## Message count
+- **Initial setup:** minimum of 4 messages (2 pairs).  
+- **Additional SAs:** can be created with CREATE_CHILD_SA exchanges.  
+
+## Tangible takeaway
+- **IKEv2 = TLS-like handshake for IPSec.**  
+- **IKE SA**: secure channel between peers (control plane).  
+- **Child SAs (ESP/AH)**: used for protecting actual data traffic (data plane).  
+- Without IKEv2, IPSec would be stuck with manual keys (no PFS, insecure).  
+
+# IPSec in Practice: Implementations and Alternatives
+
+So far, we covered the theory: IPSec protocols (ESP, AH), modes (transport vs tunnel), key exchange (IKE), and security associations (SPD/SAD/SPI).  
+Now let’s look at how IPSec is actually implemented in Linux, and what alternatives exist (OpenVPN, WireGuard).  
+
+## IPSec in Linux: StrongSwan
+
+![alt text](images/StrongSwan.png)
+
+### User space vs Kernel space
+- **User space** = where applications and daemons run (e.g., browsers, VPN daemons).  
+  - Examples: `swanctl` (configuration tool), `charon` (IKEv2 daemon).  
+  - **Job:** negotiate cryptographic parameters (IKEv2), authenticate peers, exchange keys.  
+
+- **Kernel space** = part of the operating system that directly handles packets.  
+  - Contains the **XFRM framework**, which enforces IPSec.  
+  - **Job:** apply Security Policy Database (SPD) rules and Security Associations (SAD) to each packet.  
+  - Performs the actual **ESP/AH encryption and decryption**.
+
+**Tangible workflow (example VPN session):**
+1. Admin defines a VPN policy in `/etc/swanctl/swanctl.conf`.  
+2. `swanctl` passes the config to `charon`.  
+3. `charon` runs the IKEv2 handshake with the remote peer, agrees on algorithms, and establishes keys.  
+4. Once done, `charon` installs rules (SPD) and SAs (SAD) into the kernel.  
+5. The **kernel** enforces IPSec for every packet:
+   - Outgoing: SPD says “protect” → kernel looks up SA in SAD → adds ESP header and encrypts.  
+   - Incoming: kernel looks at SPI → finds SA → decrypts → delivers cleartext to application.  
+
+👉 **User space negotiates. Kernel enforces.** This split makes sense:  
+- Negotiation is complex (certificates, DH, IKE).  
+- Packet processing must be fast → offloaded to kernel.  
+
+## Alternatives to IPSec
+
+While IPSec is mature and flexible, there are alternatives designed for different trade-offs.
+
+
+### 1. OpenVPN
+- Runs entirely in **user space**.  
+- Uses **TLS** (like HTTPS) for encryption.  
+- Pros:
+  - Very flexible and firewall-friendly (can run over TCP/443 to blend in with HTTPS).  
+  - Cross-platform, widely supported.  
+- Cons:
+  - User-space processing = **slower** (context switch for every packet).  
+  - Larger, more complex codebase.  
+
+**Real-life example:**  
+When traveling, many corporate laptops use **OpenVPN** because it works through almost any hotel Wi-Fi or airport firewall — it looks like ordinary TLS traffic.
+
+### 2. WireGuard
+- A modern VPN protocol, designed to be a **replacement for IPSec and OpenVPN**.  
+- Implemented as a **kernel module** (faster than user-space OpenVPN).  
+- Extremely small codebase (< 4,000 lines) → easier to audit and secure.  
+- Uses only modern cryptography (Curve25519, ChaCha20, Poly1305).  
+- Default transport: **UDP** (typically port 41414, but configurable).  
+
+**How peers connect:**  
+- Each peer has a static **private key** and corresponding **public key**.  
+- Public keys are exchanged out of band (config files, QR codes, etc.).  
+- Once set up, packets are automatically encrypted/decrypted.  
+
+**Real-life example:**  
+A startup might deploy **WireGuard** instead of IPSec because it’s easy to set up, fast, and secure by default.  
+Smartphones also use WireGuard in apps because it integrates seamlessly and drains less battery.
+
+## Performance Comparison
+
+![alt text](images/Linux-Implementierung.png)
+
+Benchmark results (Linux implementation):
+
+| Protocol   | Throughput (Mbps) | Latency (ms) |
+|------------|--------------------|--------------|
+| OpenVPN    | ~258               | ~1.541       |
+| IPSec      | ~825               | ~0.501       |
+| WireGuard  | ~881               | ~0.403       |
+
+**Takeaway:**
+- **WireGuard**: fastest, lowest latency.  
+- **IPSec**: close behind, still strong but more complex.  
+- **OpenVPN**: slowest, due to running in user space and TLS overhead.  
+
+## Tangible takeaway
+- **IPSec (StrongSwan on Linux):**  
+  - Enterprise-grade, highly configurable, integrates with SPD/SAD in kernel.  
+  - Complex but powerful.  
+
+- **OpenVPN:**  
+  - User space, TLS-based, highly compatible (can bypass firewalls easily).  
+  - Comes at a performance cost.  
+
+- **WireGuard:**  
+  - Lightweight, kernel-based, fastest in practice.  
+  - Simpler design, but less feature-rich than IPSec (e.g., no built-in IKE negotiation, static keys must be pre-distributed).  
+
+👉 In practice:  
+- Enterprises use **IPSec** for site-to-site VPNs.  
+- Traveling employees often use **OpenVPN** for compatibility.  
+- Modern setups increasingly adopt **WireGuard** for remote access and cloud networking.
+
+
+# Why IPSec cannot prevent DNS-Spoofing
+
+**Question:**  
+Why can’t IPSec solve the problem of DNS spoofing?
+
+**Answer:**  
+- **IPSec scope:** IPSec operates at the **network layer (Layer 3)**.  
+  - It secures IP packets in transit (confidentiality, integrity, authenticity).  
+  - It can guarantee: *“This packet really came from my IPSec peer and was not tampered with in transit.”*  
+- **DNS spoofing nature:** DNS spoofing is an **application-layer attack (Layer 7)**.  
+  - The attacker tricks you into accepting a *fake DNS response*.  
+  - IPSec cannot look inside the DNS payload to verify whether the domain resolution itself is correct.  
+- **Implication:** Even if the DNS packet is protected by IPSec, the *content of the DNS answer* may still be malicious.  
+
+**Real-world solution:**  
+- **DNSSEC (DNS Security Extensions):** adds cryptographic signatures to DNS records.  
+- **DoH / DoT (DNS over HTTPS/TLS):** encrypts DNS queries at the application layer.  
+
+👉 **Takeaway:** IPSec = protects packet delivery. DNS spoofing = problem at the DNS application layer. Different layers, different protections.
