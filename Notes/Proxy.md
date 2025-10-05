@@ -153,38 +153,61 @@ This temporary state is the "hole" you've mastered. It stays open as long as the
 
 All three patterns achieve the same outcome—your traffic exits from a controlled intermediary rather than directly from your machine—but differ in scope and ergonomics.
 
-### 1. Local port forwarding: one service, one tunnel
+### 1. Local port forwarding: *one service, one tunnel*
 
 **What you do**: Open a secure session to a remote gateway and map a local port to a single remote service. Think of it as "opening a local door that reaches one specific room in a locked building."
 
 ```bash
-ssh -L 8080:internal-dashboard.corp:80 gateway.corp.com
+ssh -L 8080:db.internal:3306 user@bastion
+```
+which means *open a local port 8080 on my laptop. Whenever I connect to it, send that traffic through SSH to the middle host (bastion). From there, connect out to the real target (db.internal:3306). Relay bytes back and forth.*
+
+**Generally:**
+```bash
+ssh -L <local_port>:<final_destination_host>:<final_destination_port> user@<middle_jump_host>
 ```
 
-**What you get**: A local `localhost:8080` that, when accessed, forwards that one TCP stream through the tunnel to the internal dashboard. Your browser thinks it's talking to a local service.
+**Start Point**: 8080 → that’s the local port you open. Anything you connect to localhost:8080 goes into the tunnel and when accessed, forwards that one TCP stream through the tunnel to the internal dashboard. Your browser thinks it's talking to a local service.
 
-**What the network sees**: One outbound SSH connection from your laptop to the gateway. Your NAT/firewall tracks only this single connection state. The internal dashboard sees requests originating from the gateway's IP, not your laptop's IP.
+**Middle**: user@bastion → that’s just the machine you have SSH access to. It could be called *bastion*, *gateway*, *jumpbox*, whatever. It’s the middleman.
 
-**When to use it**: Quick access to a single service without changing application configuration. Good for one-off debugging or accessing an internal API endpoint.
+**Final destination**: db.internal:3306 → that’s the real target you want to reach. In my earlier example it was a database, but it could just as well be: `intranet.company.com:80` (an internal website), `git.internal:22` (a private Git server), or literally any TCP service.
 
-### 2. Dynamic SSH forwarding: many services, one tunnel
+**What the network sees**: One outbound SSH connection from your laptop to the gateway. Your NAT/firewall tracks only this single connection state. The final destination service sees requests originating from the gateway's IP, not your laptop's IP.
 
-**What you do**: Start an SSH session that provides a local SOCKS listener. Configure your browser or other applications to use this local SOCKS proxy.
+**When to use it**: Quick access to a **single** service without changing application configuration. Only works for that **one target** (db.internal:3306). If you now want to reach intranet.internal:80, you must create another -L tunnel.
+>Think of -L as **hard-wiring one local port to one remote service**.
+
+### 2. Dynamic SSH forwarding: *one entry point, many destinations*
+
+**What you do**: Start an SSH session that provides a local SOCKS listener (SSH starts a local SOCKS proxy). Apps can request **any destination** dynamically.
 
 ```bash
-ssh -D 1080 gateway.corp.com
-# Then configure browser: SOCKS proxy = localhost:1080
+ssh -D 1080 user@bastion
+# Configure your apps (browser, DB client, etc.) to use a SOCKS proxy at localhost:1080
 ```
 
-**What you get**: A general-purpose local proxy that can open connections to arbitrary remote hosts and ports through the gateway. Your applications talk to the local SOCKS endpoint, and the gateway opens remote connections on their behalf.
+**What you get**: When your app wants to reach **any host:port** (e.g. db.internal:3306 or intranet.internal:80), it asks the SOCKS proxy. The proxy sends the request through SSH → bastion → target.
 
 **What the network sees**: Still just one outbound SSH connection from your laptop to the gateway. All downstream targets see the gateway as the apparent origin. The local NAT/firewall only tracks the SSH connection state.
 
 **When to use it**: Flexible access to many internal services without per-service configuration. Supports any application that can use a SOCKS proxy.
 
 **Technical detail**: SOCKS is a socket-level proxy protocol (RFC 1928) that negotiates target host:port at the protocol level. SOCKS5 supports both TCP and UDP relay.
+````
+Your app → localhost:port → [SSH encrypted tunnel] → gateway → destination
+                            ^^^^^^^^^^^^^^^^^^^^
+                            This is SSH doing the work
+````
 
-### 3. Native SOCKS proxy: application-level routing
+### 3. Native SOCKS proxy: application-level routing, *any target host/port, just like ssh -D*
+
+*But the big difference: the SOCKS proxy is not tied to SSH: it’s either a standalone service (company server) or a daemon (Tor).*
+````
+Your app → socks-server:port → destination
+           ^^^^^^^^^^^^^^^^
+           Direct SOCKS connection (no SSH tunnel)
+````
 
 **What you do (corporate SOCKS)**: Configure your applications or system to use a company-provided SOCKS server, typically requiring authentication.
 
@@ -194,24 +217,67 @@ ssh -D 1080 gateway.corp.com
 
 **What the network sees**: For corporate SOCKS, your NAT sees an outbound connection to the company proxy. For Tor, your NAT sees connections to Tor nodes. In both cases, final destination sites see the exit point (company proxy or Tor exit node) as the origin.
 
-**When to use it**: Corporate SOCKS for mandatory egress policy enforcement. Tor for privacy-sensitive browsing when anonymity is required.
+### All three cases have the same topology
+```
+My laptop → Middleman server → Final destination
+```
+***The only difference is the mechanism/protocol we use to communicate with that middleman, the middleman is the same physical server but different software/configuration***
+````
+Physical Remote Server A:
+├─ Running: OpenSSH server
+├─ Listens on Port 22: SSH connections (can do -L and -D tunneling)
+└─ Use case: OpenSSH client on my laptop and OpenSSH server on the gateway work together to create the SOCKS proxy. 
 
-### The SOCKS legacy: from classic daemon to modern service mesh
+Physical Remote Server B:
+├─ Running: Dante SOCKS daemon
+├─ Listens on a port (commonly 1080) for SOCKS protocol connections
+└─ Use case: Dedicated proxy service
 
-SOCKS established the canonical two-leg proxy pattern in the 1990s: accept a client connection, authenticate it, and if allowed, originate a fresh connection to the target. This exact pattern now appears throughout modern infrastructure:
+Could they be the same physical server? Yes:
+├─ Running: Both OpenSSH AND Dante
+├─ Port 22: SSH connections
+├─ Port 1080: SOCKS connections
+└─ Use case: Both tunneling and dedicated proxy
+````
+
+### The SOCKS legacy: from classic daemon to modern "service **mesh**" – *Not a single proxy, but a network of interconnected **proxies***
+
+SOCKS established the canonical two-leg proxy pattern in the 1990s: accept client connection (leg 1) → originate server connection (leg 2). 
+> **one sidecar proxy for each service**: They form a "mesh" topology where every service has its own proxy, and these proxies communicate with each other to route traffic. (A **sidecar** is a separate container that runs alongside your main service container, in the **same** pod/unit and can talk via localhost)
+
+````
+[Service A + Envoy] ←→ [Service B + Envoy] ←→ [Service C + Envoy]
+        ↓                      ↓                      ↓
+[Service D + Envoy]     [Service E + Envoy]   [Service F + Envoy]
+````
+*All the Envoy proxies together form the "mesh"—a distributed system of proxies that handle all inter-service communication.*
+
+This exact pattern now appears throughout modern infrastructure:
 
 - Corporate forward proxies enforcing egress policy
-- Envoy sidecars in Kubernetes service meshes
+  - Employee browser → proxy (leg 1)
+  - Proxy → external website (leg 2)
+  - Proxy checks policy before making leg 2
 - Atlassian Edge terminating and re-originating connections
-- SSH dynamic forwarding (`-D` flag)
+  - When you access Jira Cloud:
+  - Your browser → Atlassian Edge (leg 1)
+  - Atlassian Edge → Jira backend service (leg 2)
+  - Edge validates your session, adds tracing headers, enforces policy
+- In a Kubernetes cluster running a service mesh:
+  - Service A → Envoy sidecar (leg 1)
+  - Envoy sidecar → Service B (leg 2)
+  - Envoy handles encryption, auth, retries, metrics
+- SSH dynamic forwarding (`-D` flag) we already discussed:
+  - Your app → SSH gateway (leg 1, through SSH tunnel)
+  - SSH gateway → destination (leg 2)
 
-The lineage is direct and unbroken. What began with SOCKS daemons on Unix systems is now the foundation of cloud-native networking.
+The lineage is direct and unbroken. SOCKS invented this approach in the 1990s. Today's fancy cloud infrastructure (service meshes, edge proxies, SSH tunnels) all use the exact same architectural pattern—they just have more features and fancier names.
 
 ## What proxy firewalls can enforce that packet filters cannot
 
 Because they terminate sessions and speak application protocols, proxy firewalls enable a different class of security controls:
 
-**Identity-aware decisions**: User groups, device posture, mTLS client certificates, OAuth scopes. Example: "Allow `/api/tickets` only for users with `tickets:read` scope."
+**Identity-aware decisions**: User groups, device posture, mTLS (mutual TLS) client certificates, OAuth scopes. Example: "Allow `/api/tickets` only for users with `tickets:read` scope."
 
 **Protocol-aware validation**: HTTP method allowlists, header size caps, MIME type constraints, SMTP recipient policies. Example: "Deny HTTP CONNECT method except for approved administrators."
 
@@ -838,6 +904,7 @@ Imagine a university network where different types of users and systems need dif
 ![alt text](images/physical-separation-on-single-switch.png)
 
 *A VLAN-capable switch recognizes the network as two independent segments. From the computer's perspective, the network behaves as if it's connected to its own dedicated switch. The hardware router connects the three VLANs at the IP level.*
+
 **What you're looking at:**
 
 This diagram shows a single physical network switch (the gray box in the center labeled "Switch") with multiple computers connected to it. The computers are color-coded: some are pink/light colored and others are orange/darker colored.
@@ -866,6 +933,7 @@ You can deploy one physical switch in an office, but create complete network sep
 ![alt text](images/uni-VLAN.png)
 
 *Planning principle: All computers connected by the same circle in the diagram are in the same VLAN.*
+
 **What you're looking at:**
 
 This is a logical network topology diagram showing how a university network is segmented using VLANs. Instead of showing physical connections, this diagram shows the logical organization—which systems belong to which security zones.
@@ -946,6 +1014,7 @@ With VLANs: The compromised laptop is in the "Untrusted Clients" VLAN. It cannot
 **The solution**: VLAN tagging using IEEE 802.1Q standard. Switches can be interconnected, and each Ethernet frame carries a VLAN tag identifying which virtual network it belongs to.
 ![alt text](images/Multiple-Switches.png)
 *With spatially separated switches and three VLANs connected: VLAN tagging between switches serves for correct assignment of frames to their respective LANs. The hardware router connects the three VLANs at IP level.*
+
 **What you're looking at:**
 
 This diagram shows two physical network switches (labeled "Switch" in gray boxes) connected together, with a router at the bottom. Three different VLANs (represented by three colors: pink/VLAN 1, orange/VLAN 2, and green/VLAN 3) are distributed across both switches.
@@ -1000,6 +1069,7 @@ Key points visible in the diagram:
 **802.1Q tagged frame**:
 ![alt text](images/VLAN-Tag-Ethernet.png)
 *802.1Q defines a new VLAN tag in the Ethernet header. Bytes 1 and 2: Type = 0x810 (Tag Protocol Identifier TPID). Bytes 3 and 4: PCP, DEI and 12-bit VLAN ID.*
+
 **What you're looking at:**
 
 This is a detailed diagram of the Ethernet frame header, showing exactly where the 4-byte VLAN tag is inserted and how those 4 bytes are structured.
