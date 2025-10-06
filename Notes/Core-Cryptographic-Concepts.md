@@ -1102,6 +1102,7 @@ IP⁻¹ `position 1 → bit 58`
 This gives you `k₁` through `k₁₆`
 
 Plaintext → Initial Permutation (IP) → 16 Rounds → Swap Halves → Final Permutation (IP⁻¹) → Ciphertext
+
 ---
 
 ### Decryption in DES
@@ -1146,7 +1147,7 @@ By round 5, every bit of the output depends on:
 * Replaced by **Triple DES** and later **AES**
 * Still historically important for understanding symmetric encryption
 
-![alt text](./images/./images/DES-2.png)
+![alt text](./images/DES-2.png)
 
 #### In DES:
 
