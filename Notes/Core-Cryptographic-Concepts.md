@@ -887,7 +887,6 @@ ECB is the **simplest mode** of using a block cipher like AES.
 
 Each block is handled **on its own**, without influence from the others.
 
----
 ![alt text](./images/ECB-1.png)
 
 ### Encryption:
@@ -910,8 +909,6 @@ cₙ → [Dₖ] → mₙ
 
 Can be done **in parallel** - No randomness, no chaining
 
----
-
 ## ECB Is Broken for Structured Data 🐧 
 ![alt text](./images/ECB-2.png)
 
@@ -924,18 +921,16 @@ Why? Because:
 
 This is why ECB **should never be used for encrypting images, documents, or structured files**.
 
----
-
 ## ✅ ECB Mode Summary
 
 | Feature                         | ECB Mode                                  |
 | ------------------------------- | ----------------------------------------- |
 | Encrypts in blocks              | Yes                                       |
 | Each block is independent       | Yes                                       |
-| Easy to parallelize             | ✅ Yes                                     |
-| Repeating blocks leak patterns  | ❌ Yes                                     |
-| Blocks can be reordered/removed | ❌ Yes — no integrity                      |
-| Use in practice                 | ❌ Don't use for images or structured data |
+| Easy to parallelize             | Yes                                     |
+| Repeating blocks leak patterns  | Yes                                     |
+| Blocks can be reordered/removed | Yes, no integrity                      |
+| Use in practice                 | Don't use for images or structured data |
 
 ---
 ## Cipher Block Chaining (CBC) Mode
