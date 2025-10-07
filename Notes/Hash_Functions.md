@@ -310,20 +310,21 @@ Public and private keys are like **twins with complementary powers**:
 
 Even if a hacker or receiver uses the **wrong public key**, RSA math still works:
 
-```plaintext
-wrong_result = signature^e_wrong mod n_wrong
+```math
+M^{e_{\text{wrong}} \times d_{\text{correct}}} \bmod n_{\text{wrong}} = \text{??? (some random number)}
 ```
+- This still produces a number. The equation doesn't break.
 
-- This still produces a number.
-- But that number is meaningless: it won’t match the expected hash.
-
-The equation doesn’t break. It just fails to validate the signature.
+- But that number is meaningless: it won't match the expected hash as the correct keys would:
+```math
+M^{e \cdot d} \equiv M \pmod{n} \quad \text{(correct keys)}
+```
 
 This is by design:  
 Only the matching key pair (i.e., the true twins) produces a valid, verifiable signature.
 
 
-## 3. When Hashes Don’t Match — What Could It Mean?
+## 3. When Hashes Don’t Match
 
 If `hash(received_message) ≠ signature^e mod n`, one of two things has gone wrong:
 

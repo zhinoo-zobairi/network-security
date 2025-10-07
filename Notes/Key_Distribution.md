@@ -1,4 +1,4 @@
-# Deep Dive: Diffie–Hellman Key Exchange (DH)
+# Diffie–Hellman Key Exchange (DH)
 
 ## What Is It?
 
@@ -8,8 +8,6 @@ It relies on:
 
 * Modular arithmetic
 * The difficulty of the **discrete logarithm problem (DLP)**
-
----
 
 ## Core Setup
 
@@ -880,10 +878,6 @@ This totient is **crucial** in RSA because:
 * It defines the modular space for key generation
 * Used when computing $d$, the modular inverse of $e$ modulo $\varphi(n)$
 
----
-
-Want to go deeper into RSA key generation next?
-
 ## RSA Key Generation
 
 Let’s say Alice wants to create an RSA key pair.
@@ -1143,7 +1137,7 @@ This means:
 * Raising a number $a$ (coprime with $n$) to $\varphi(n)$ gives 1 under modulo $n$
 
 Example:
-$a = 2, n = 15 \Rightarrow \varphi(15) = 8 \Rightarrow 2^8 \mod 15 = 1$
+$$a = 2, n = 15 \Rightarrow \varphi(15) = 8 \Rightarrow 2^8 \bmod 15 = 1$$
 
 ## Section 6: RSA Key Generation
 
@@ -1285,11 +1279,51 @@ PQC is based on **problems not known to be solvable efficiently by quantum algor
 * Many infrastructures (e.g., identity, banking, software signing) depend on RSA
 * Migration to PQC will take **10–20 years** to fully deploy
 
----
-
-## Takeaways
+# Takeaways
 
 * RSA and similar systems are **insecure against quantum attackers**
 * Post-quantum cryptography is our **only classical solution**
 * Modern cryptography must prepare **now** to defend against future quantum computers
+Your understanding is very good! Let me create a clean summary based on what you said. I'll refine it slightly for clarity:
 
+### Diffie-Hellman vs RSA
+
+### Diffie-Hellman (Key Exchange)
+
+Both sides create a **shared secret** using public components they exchange.
+
+**How it works:**
+- Each side has a **secret** (private) component that only they know
+- Each side creates a **public key** by raising a public base to the power of their secret
+- They exchange these public keys
+- Each side takes the other's public key and raises it to the power of their own secret
+- Due to the **rules of exponents**, both end up with the same shared secret: (g^a)^b = (g^b)^a = g^(ab)
+
+### RSA (Encryption & Signatures)
+
+RSA uses properties of prime numbers and the **Euler totient function φ(n)**.
+
+**Key Generation:**
+
+1. **Choose two prime numbers** p and q
+2. **Multiply them** to get n = p × q (this n will be part of both public and private keys)
+3. **Calculate φ(n)** = (p-1) × (q-1)
+   - This tells us how many numbers smaller than n are coprime with n
+   - Why? For a prime, φ(p) = p-1 (all smaller numbers are coprime)
+   - For n = p×q: φ(n) = (p-1)(q-1)
+
+4. **Find e** (public exponent):
+   - Choose e where 1 < e < φ(n)
+   - e must be coprime with φ(n) (gcd(e, φ(n)) = 1)
+
+5. **Find d** (private exponent):
+   - Find d such that: (e × d) mod φ(n) = 1
+   - In other words: e × d ≡ 1 (mod φ(n))
+   - This is the **mathematical magic** of RSA:
+      - The exponent $de$ "collapses" to $1$ *inside the modulo world*,  
+      - So we get back the original "Klartext", even after two exponentiations!
+    - The exponents e and d are inverses of each other **in the modulo φ(n) world**
+
+**Keys:**
+- **Public key:** (n, e)
+- **Private key:** (n, d)

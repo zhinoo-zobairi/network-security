@@ -1346,13 +1346,13 @@ This lets AES produce unique per-round keys even from a short original key.
 ### Step 1: Initial State Setup
 ### State Matrix: How AES Organizes Data
 
-We start with a 128-bit plaintext block:
+We start with a 128-bit **plaintext** block:
 
 ```plaintext
 [0x32, 0x43, 0xF6, 0xA8, 0x88, 0x5A, 0x30, 0x8D, 0x31, 0x31, 0x98, 0xA2, 0xE0, 0x37, 0x07, 0x34]
 ```
 
-* The 128-bit block is arranged into a 4×4 byte matrix called the **state**:
+* The 128-bit **plaintext** block is arranged into a 4×4 byte matrix called the **state**:
 
   ```
   [ s00 s01 s02 s03 ]
@@ -1363,7 +1363,7 @@ We start with a 128-bit plaintext block:
 
   * Each `sij` is **1 byte** (8 bits), represented in hex (e.g., `f0` = `11110000`)
 
-Example:
+The key trick here is that AES fills the matrix column by column, not row by row:
 ```plaintext
 [ [0x32, 0x88, 0x31, 0xE0],
   [0x43, 0x5A, 0x31, 0x37],
@@ -1373,18 +1373,23 @@ Example:
 ### Step 2: AddRoundKey (First XOR)
 
 Each byte of the state is XORed with the corresponding **key byte**:
-We’re taking one column from the state matrix (4 bytes = 32 bits), and we’re multiplying it by this fixed matrix, column-by-column (Example below)
+We’re taking one column from the state matrix (**plaintext**, 4 bytes = 32 bits), and we’re multiplying it by this fixed matrix, column-by-column (Example below)
 > This XOR is done **column-wise**, since the state is organized as a 4×4 byte matrix. Each round key is also arranged in columns, so the XOR operation is applied byte-by-byte, column by column. 
 
 ```plaintext
 state[i][j] = plaintext[i][j] ⊕ round_key[0][i][j]
 ```
-
+```
+State:        Round Key:      Result:
+   [0x32 ...]    [0xAB ...]  →  [0x32⊕0xAB ...]
+   [0x43 ...]    [0xCD ...]     [0x43⊕0xCD ...]
+   [0xF6 ...]    [0xEF ...]     [0xF6⊕0xEF ...]
+   [0xA8 ...]    [0x12 ...]     [0xA8⊕0x12 ...]
+```
+>**Column-by-column**: Each byte in column 0 of the state is XORed with the corresponding byte in column 0 of the round key, then column 1, then column 2, etc.
 This injects the secret key into the plaintext **immediately**.
 
-⛔️ This isn’t normal integer multiplication. We’re working in:
-
-**GF(2⁸): Galois Field with 256 elements**
+⛔️ AES works with **8-bit** bytes. But what mathematical operations can we do with 8 bits? Interpret each 8-bit byte as an element of the Galois Field GF(2⁸).
 
 ## AES Round Internals (Per Round)
 
@@ -1504,8 +1509,6 @@ Now XOR with 0x1B:
 
 ✅ Final Result: 3 • 0x83 = 0x9E
 
----
-
 ## Summary Table
 
 | x    | 2 • x | 3 • x |
@@ -1567,7 +1570,6 @@ a^{-1}(x) = \{0b\}x^3 + \{0d\}x^2 + \{09\}x + \{0e\}
 
 ```
 > These constants are carefully chosen so that the inverse MixColumns operation also stays inside GF(2⁸)[x] and correctly undoes the mixing.
----
 
 ### 4. AddRoundKey Again
 
@@ -1583,8 +1585,6 @@ This repeats for 10 rounds (AES-128).
 
 Final round skips the **MixColumns** step!
 
----
-
 ## How TBOX and Timing Attacks Fit In
 
 * TBOX combines SubBytes + ShiftRows + MixColumns for speed
@@ -1598,4 +1598,3 @@ plaintext[5] = 0xE3
 cipher_byte = TBOX[0x8B]
 key[5] = 0x8B ⊕ 0xE3 = 0x68
 ```
----
