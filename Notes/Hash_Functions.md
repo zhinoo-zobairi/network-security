@@ -362,7 +362,7 @@ We originally said RSA depends on two keys — but in truth, it relies on **thre
 If this bond isn’t satisfied, RSA simply won’t work.  
 And if someone **finds φ(n)** (which is based on the prime factors of `n`), they can **compute `d`** and completely break the system.
 
-## 💭 Aha Moment / 🤯 Realization Zone: Wait... if my public key is public, how is any of this safe?
+## Aha Moment 💭 / Realization Zone: Wait... if my public key is public, how is any of this safe? 🤯 
 
 > *“If I encrypt (or sign) a message using my **private** key, and everyone has access to my **public** key, then... can’t anyone just decrypt it? Isn’t that insecure?”*
 
@@ -386,7 +386,7 @@ That gives you:
 - ✅ **Confidentiality**: "Only the right person can read it."
 
 This is the moment where crypto stops being just math and starts being **meaningful engineering**.
---- 
+
 ## MD5 vs SHA-1: Understanding One-Way Hash Functions Step-by-Step
 
 ### What is a One-Way Hash Function?
@@ -720,7 +720,7 @@ K[3] = 0xe9b5dba5
 K[63] = 0xc67178f2
 ```
 
-👉 These are not random — they're mathematically derived, and every SHA-256 implementation uses the exact same set.
+👉 These are not random; they're mathematically derived, and every SHA-256 implementation uses the exact same set.
 
 
 ### 2. What's Going on in the Loop?
@@ -1171,7 +1171,7 @@ Participants:
 #### Sender A:
 
 1. Compute the hash of the message: $H(M)$
-2. Sign the hash: $\text{Sig}(M) = H(M)^{d_A} \mod n_A$
+2. Sign the hash: $text{Sig}(M) = H(M)^{d_A} mod n_A$
 3. Send both message and signature: $M \| \text{Sig}(M)$
 
 ---
@@ -1180,7 +1180,7 @@ Participants:
 
 1. Receive the message and signature: $M \| \text{Sig}(M)$
 2. Compute $H(M)$
-3. Verify signature by computing: $\text{Sig}(M)^{e_A} \mod n_A$
+3. Verify signature by computing: $text{Sig}(M)^{e_A} mod n_A$
 4. If the result matches $H(M)$, the signature is valid and proves:
 
    * Message is authentic (from A)
